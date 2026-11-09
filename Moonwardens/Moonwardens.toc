@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Moonwardens
+## Notes: Guild map, layers, alerts, stats and leaderboard for the Moonwardens. Type /mw.
+## Author: Krylea
+## Version: 0.1.0
+## SavedVariables: MoonwardensDB
+
+Core.lua
+Comm.lua
+Roster.lua
+UI.lua
