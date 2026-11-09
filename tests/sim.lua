@@ -37,6 +37,7 @@ ns.Roster.Build()
 check(ns.Roster.Stats(false).race.Skyborne.label == "Skyborne", "race name shortened")
 check(s.level[7] == 2 and s.level[5] == 1 and s.level[4] == 1, "level bands")
 check(ns.Roster.Stats(true).total == 3, "online-only stats")
+check(ns.UI.Pct(108, 130) == "83%" and ns.UI.Pct(1, 300) == "<1%" and ns.UI.Pct(0, 5) == "0%" and ns.UI.Pct(1, 0) == "", "percent")
 
 -- Comm: decode, membership, own messages, newer version
 local got = {}
@@ -60,6 +61,12 @@ check(W.sent[2].at - W.sent[1].at >= 0.25 - 1e-9, "spacing")
 -- UI builds and opens
 ns.ToggleWindow()
 check(MoonwardensFrame and MoonwardensFrame:IsShown(), "window opens")
+do
+    local texts = {}
+    for _, fr in ipairs(W.frames) do if fr._kind == "FontString" and fr._text then texts[#texts + 1] = tostring(fr._text) end end
+    local all = table.concat(texts, "\n")
+    check(all:find("2  |cff9d9d9d67%|r", 1, true) and all:find("1  |cff9d9d9d25%|r", 1, true) and all:find("\n50%\n", 1, true) , "stats show count and percent")
+end
 ns.ToggleWindow(9)
 check(MoonwardensFrame.current == 9, "settings page")
 W.missingTemplates = { PortraitFrameTemplate = true }

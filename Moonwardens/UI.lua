@@ -123,13 +123,23 @@ local function makeBar(parent)
     row.label = UI.Text(row, nil, nil, "LEFT"); row.label:SetPoint("LEFT"); row.label:SetWidth(84)
     row.bar = CreateFrame("StatusBar", nil, row)
     row.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    row.bar:SetPoint("LEFT", 88, 0); row.bar:SetSize(124, 11)
+    row.bar:SetPoint("LEFT", 88, 0); row.bar:SetSize(100, 11)
     local bg = row.bar:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.6)
-    row.value = UI.Text(row, nil, nil, "RIGHT"); row.value:SetPoint("RIGHT"); row.value:SetWidth(34)
+    row.value = UI.Text(row, nil, nil, "RIGHT"); row.value:SetPoint("RIGHT"); row.value:SetWidth(60)
     return row
 end
 
+-- "83%"; "<1%" for a small non-zero share.
+function UI.Pct(n, total)
+    if not total or total <= 0 then return "" end
+    local p = math.floor(100 * n / total + 0.5)
+    if p == 0 and n > 0 then return "<1%" end
+    return p .. "%"
+end
+
 local function fillBars(rows, pool, parent, anchor, entries, colorOf)
+    local total = 0
+    for _, e in ipairs(entries) do total = total + e.n end
     table.sort(entries, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.label < b.label end)
     local maxN = entries[1] and entries[1].n or 1
     for i = 1, math.max(#entries, #pool) do
@@ -144,7 +154,7 @@ local function fillBars(rows, pool, parent, anchor, entries, colorOf)
             row.bar:SetStatusBarColor(r, g, b)
             row.bar:SetMinMaxValues(0, maxN)
             row.bar:SetValue(e.n)
-            row.value:SetText(e.n)
+            row.value:SetText(e.n .. "  |cff9d9d9d" .. UI.Pct(e.n, total) .. "|r")
             row:Show()
         elseif row then
             row:Hide()
@@ -189,6 +199,7 @@ local function buildStats(f)
         end
         col.bar:SetPoint("BOTTOM", 0, 14); col.bar:SetWidth(20)
         col.n = UI.Text(col, "small", nil, "CENTER"); col.n:SetPoint("BOTTOM", col.bar, "TOP", 0, 2)
+        col.pct = UI.Text(col, "small", UI.GREY, "CENTER"); col.pct:SetPoint("BOTTOM", col.n, "TOP", 0, 1)
         col.label = UI.Text(col, "small", UI.GREY, "CENTER"); col.label:SetPoint("BOTTOM", 0, 0); col.label:SetText(LEVEL_BANDS[i])
         f.levelBars[i] = col
     end
@@ -216,8 +227,9 @@ local function refreshStats(f)
     for i = 1, #LEVEL_BANDS do maxBand = math.max(maxBand, s.level[i] or 0) end
     for i, col in ipairs(f.levelBars) do
         local n = s.level[i] or 0
-        col.bar:SetHeight(math.max(1, 70 * n / maxBand))
+        col.bar:SetHeight(math.max(1, 60 * n / maxBand))
         col.n:SetText(n)
+        col.pct:SetText(UI.Pct(n, s.total))
     end
     local foot = "Race is read for everyone on the roster, offline members included."
     if s.unknownRace > 0 then foot = foot .. (" %d not known yet."):format(s.unknownRace) end
