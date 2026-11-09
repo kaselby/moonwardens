@@ -2,13 +2,14 @@
 ## Title: Moonwardens
 ## Notes: Guild map, layers, alerts, stats and leaderboard for the Moonwardens. Type /mw.
 ## Author: Krylea
-## Version: 0.2.0
+## Version: 0.3.0
 ## SavedVariables: MoonwardensDB
 
 Core.lua
 Comm.lua
 Roster.lua
 Position.lua
+Layer.lua
 MapWorld.lua
 MapMini.lua
 UI.lua

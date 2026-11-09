@@ -218,4 +218,17 @@ function WorldMapFrame:HookScript(k, fn)
     local old = self._scripts[k]
     self._scripts[k] = old and function(...) old(...); fn(...) end or fn
 end
+-- Units for the layer detector: W.units[token] = { guid, pc = player-controlled }
+W.units = {}
+function UnitExists(u) return W.units[u] ~= nil end
+function UnitGUID(u) return W.units[u] and W.units[u].guid end
+function UnitPlayerControlled(u) return W.units[u] and W.units[u].pc or false end
+W.plates = {}
+C_NamePlate = { GetNamePlates = function()
+    local t = {}
+    for _, tok in ipairs(W.plates) do t[#t + 1] = { namePlateUnitToken = tok } end
+    return t
+end }
+W.cleu = nil
+function CombatLogGetCurrentEventInfo() return unpack(W.cleu) end
 return W

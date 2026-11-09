@@ -132,6 +132,7 @@ W.advance(55)
 check(P.CountInMyZone() == 0, "stale dots dropped")
 
 -- Layers seen through positions (a stand-in detector says I'm on 7)
+local realLayer = ns.Layer
 ns.Layer = { Mine = function() return 7 end }
 W.advance(1.5)
 recv("P|1|1440|0.4000|0.6000|7|0|60", "Thalanor-Oakheart")
@@ -224,9 +225,68 @@ ns.db.minimapDots = false
 W.advance(0.2)
 check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")
 ns.db.minimapDots = true
-ns.Layer = nil
+ns.Layer = realLayer
 SlashCmdList.MOONWARDENS("test")
 check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test")
+
+---------------------------------------------------------------------------
+-- Phase 3: layer detector
+---------------------------------------------------------------------------
+local Lr = ns.Layer
+local function npc(server, spawn) return ("Creature-0-%d-1-2-3346-%s"):format(server, spawn) end
+local layerEvents = {}
+ns.listen("LAYER", function(map, from, to) layerEvents[#layerEvents + 1] = { map, from, to } end)
+W.fire("PLAYER_ENTERING_WORLD")
+W.advance(2)
+check(Lr.Mine(1440) == 0, "unknown at start")
+W.units.target = { guid = npc(7075, "A1") }
+W.fire("PLAYER_TARGET_CHANGED"); W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 0, "same NPC twice is not enough")
+W.units.mouseover = { guid = "Pet-0-7052-1-2-1234-B1", pc = true }
+W.fire("UPDATE_MOUSEOVER_UNIT")
+W.units.mouseover = { guid = npc(7052, "B2"), pc = true }    -- a player's guardian
+W.fire("UPDATE_MOUSEOVER_UNIT")
+W.units.mouseover = { guid = "Player-0-7052-0001" }
+W.fire("UPDATE_MOUSEOVER_UNIT")
+check(Lr.Mine(1440) == 0, "pets, guardians and players ignored")
+W.units.mouseover = { guid = npc(7075, "A2") }
+W.fire("UPDATE_MOUSEOVER_UNIT")
+check(Lr.Mine(1440) == 7075 and layerEvents[#layerEvents][3] == 7075, "two NPCs confirm the layer")
+check(Lr.Mine(1439) == 0, "layer is per zone")
+W.advance(1.5)
+check(lastSent("P").m:match("^P|1|1440|[%d.]+|[%d.]+|7075|"), "P carries the layer: " .. lastSent("P").m)
+-- A different number: one NPC is not enough, two are
+W.units.n1 = { guid = npc(7062, "C1") }
+W.plates = { "n1" }
+W.advance(2.1)
+check(Lr.Mine(1440) == 7075, "one NPC with a new number doesn't switch")
+W.fire("NAME_PLATE_UNIT_ADDED", "n1")
+check(Lr.Mine(1440) == 7075, "same NPC again doesn't switch")
+W.cleu = { 0, "SWING_DAMAGE", false, npc(7062, "C2"), "Mob", 0xa48, 0, "Player-0-1-2", "Me", 0x511, 0 }
+W.fire("COMBAT_LOG_EVENT_UNFILTERED")
+check(Lr.Mine(1440) == 7062, "second NPC (combat log) switches")
+W.cleu = { 0, "SWING_DAMAGE", false, npc(7001, "D1"), "Wolf", 0x1111, 0, npc(7001, "D2"), "Pet", 0x1111, 0 }
+W.fire("COMBAT_LOG_EVENT_UNFILTERED")
+check(Lr.Mine(1440) == 7062, "player-controlled in combat log ignored")
+W.plates = {}
+-- Tooltip, panel label
+MoonwardensMinimapButton._scripts.OnEnter(MoonwardensMinimapButton)
+check(table.concat(GameTooltip.lines, "\n"):find("Your layer: Layer %d+"), "minimap tooltip layer line: " .. table.concat(GameTooltip.lines, " / "))
+-- Zone change and shard transfer forget it
+W.fire("ZONE_CHANGED_NEW_AREA")
+check(Lr.Mine(1440) == 0, "forgotten on zone change")
+W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
+W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075, "re-confirmed")
+W.fire("SHARD_TRANSFER")
+check(Lr.Mine(1440) == 0, "forgotten on shard transfer")
+W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
+W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
+W.advance(601)
+check(Lr.Mine(1440) == 0, "forgotten after 10 min")
+W.units = {}
+SlashCmdList.MOONWARDENS("layer")
+check(W.prints[#W.prints]:find("experimental", 1, true), "/mw layer")
 
 local errs = {}
 for _, line in ipairs(W.prints) do if line:find("error", 1, true) then errs[#errs + 1] = line end end

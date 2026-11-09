@@ -159,7 +159,7 @@ function Position.LayersIn(map)
     for _, g in pairs(Position.All()) do
         if g.map == map then add(g.layer) end
     end
-    if me.map == map then add(me.layer, true) end
+    if me.map == map then add(myLayer(map), true) end
     local list = {}
     for _, e in pairs(by) do list[#list + 1] = e end
     table.sort(list, function(a, b) return a.layer < b.layer end)
@@ -178,8 +178,9 @@ end
 -- "na" (other zone, or no layer detector yet: drawn solid).
 function Position.Relation(g)
     if not ns.Layer or g.map ~= me.map then return "na" end
-    if not g.layer or g.layer == 0 or not me.layer or me.layer == 0 then return "unknown" end
-    return g.layer == me.layer and "same" or "other"
+    local mine = myLayer(me.map)
+    if not g.layer or g.layer == 0 or mine == 0 then return "unknown" end
+    return g.layer == mine and "same" or "other"
 end
 
 -- Tooltip lines for one guildie (world map and minimap share them).
