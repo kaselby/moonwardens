@@ -253,4 +253,12 @@ function AcceptGroup() W.accepted = W.accepted + 1 end
 function StaticPopup_Hide(w) table.insert(W.popupsHidden, w) end
 function PlaySound(id) table.insert(W.sounds, id) end
 function GetBindingKey(b) if b == "MOONWARDENS_RESPOND" then return "ALT-R" end end
+-- Honorable kills and weekly reset
+W.hk = nil            -- GetPVPSessionStats() kills; nil = not available yet
+function GetPVPSessionStats() return W.hk, 0 end
+function GetZoneText() return W.maps[W.map] and W.maps[W.map].name or "" end
+W.untilReset = nil    -- set to make C_DateAndTime.GetSecondsUntilWeeklyReset exist
+C_DateAndTime = setmetatable({}, { __index = function(_, k)
+    if k == "GetSecondsUntilWeeklyReset" and W.untilReset then return function() return W.untilReset end end
+end })
 return W

@@ -373,6 +373,103 @@ check(A.Current() == nil and not pip:IsShown(), "E ends it, pip gone")
 check(A.Direction(1, 0) == "east" and A.Direction(0, -1) == "north" and A.Direction(-1, 1) == "southwest", "compass")
 check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Respond()", 1, true), "keybinds file")
 
+---------------------------------------------------------------------------
+-- Phase 5: leaderboard
+---------------------------------------------------------------------------
+local LB = ns.Leaderboard
+local WEEK = 604800
+-- Week id: fallback (Tuesday 15:00 UTC), and the client API agreeing with it
+local nr = LB.NextReset()
+local left = nr - GetServerTime()
+check(left > 0 and left <= WEEK and (nr - 1704207600) % WEEK == 0, "fallback reset on the Tuesday grid")
+local wk = LB.Week()
+W.untilReset = left + 3 * 3600   -- a region resetting 3 h later
+check(LB.Week() == wk and LB.NextReset() == nr + 3 * 3600, "client reset API used, same week id")
+W.untilReset = nil
+-- Login HQ went out, and the retry (nobody answered)
+local hq1, hq2 = false, false
+for _, m in ipairs(W.sent) do
+    if m.m == "HQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
+    if m.m == "HQ|1|" .. wk .. "|2" then hq2 = true end
+end
+check(hq1 and hq2, "HQ on login, retry when no HS")
+-- Counting
+W.map, W.instance = 1440, false
+W.hk = 30
+W.advance(6)
+check(LB.Mine() == 0, "kills from before login not counted")
+W.hk = 31
+W.fire("PLAYER_PVP_KILLS_CHANGED"); W.fire("PLAYER_PVP_KILLS_CHANGED")
+check(LB.Mine() == 1, "one kill, event fired twice: counted once")
+W.map = 1439; W.hk = 32; W.advance(6)
+check(LB.Mine() == 1, "kill in Darkshore not counted")
+W.map = 1440; W.hk = 0; W.advance(6); W.hk = 2; W.fire("PLAYER_PVP_KILLS_CHANGED")
+check(LB.Mine() == 3, "counter reset (new day) handled")
+W.instance = true; W.hk = 3; W.advance(6); W.instance = false
+check(LB.Mine() == 3, "kill in an instance (Warsong) not counted")
+local nH = countSent("H")
+W.advance(31)
+check(countSent("H") == nH + 1 and lastSent("H").m == "H|1|" .. wk .. "|3", "one debounced H: " .. tostring(lastSent("H") and lastSent("H").m))
+W.hk = 4; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
+W.hk = 5; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
+check(countSent("H") == nH + 1, "no second H within 30 s")
+W.advance(25)
+check(countSent("H") == nH + 2 and lastSent("H").m == "H|1|" .. wk .. "|5", "then one H with the latest count")
+-- Receiving H
+recv("H|1|" .. wk .. "|50", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|40", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|99", "Random-Stranger")
+recv("H|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
+local rows = LB.Rows(wk)
+check(#rows == 2 and rows[1].name == "Thalanor Oakheart" and rows[1].c == 50 and rows[1].level == 60
+    and rows[2].key == "sanalune silverwind", "H stored as max, stranger and far week ignored")
+-- Sync: Caelith (online, just heard) is lowest, so she answers attempt 1; I answer attempt 2
+recv("H|1|" .. wk .. "|5", "Caelith-Shade")
+check(LB.Repliers("thalanor oakheart")[1] == "caelith shade", "elected replier: lowest recent name")
+local nHS = countSent("HS")
+recv("HQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
+W.advance(1)
+check(countSent("HS") == nHS, "not elected: no reply")
+recv("HQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
+W.advance(1)
+local hs = lastSent("HS")
+check(hs and hs.ch == "WHISPER" and hs.to == "Thalanor-Oakheart" and hs.m:find("Thalanor-Oakheart:50", 1, true)
+    and hs.m:find("Sanalune-Silverwind:5", 1, true) and hs.m:find("Caelith-Shade:5", 1, true), "HS reply: " .. tostring(hs and hs.m))
+W.fire("CHAT_MSG_ADDON", "MWG1", "HS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
+rows = LB.Rows(wk)
+check(#rows == 4 and LB.Mine() == 5, "HS merged; my own count not overwritten; stranger not shown")
+-- Chunks stay under 255 bytes and carry everyone
+local big = {}
+for i = 1, 40 do big["member" .. i .. " longsurname"] = { n = ("Member%d Longsurname"):format(i), c = i } end
+ns.db.board[wk - 1] = big
+local chunks, total = LB.Chunks(wk - 1), 0
+local okLen = true
+for _, c in ipairs(chunks) do
+    total = total + #c
+    if #table.concat({ "HS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
+end
+check(#chunks >= 4 and total == 40 and okLen, "chunks: " .. #chunks .. " messages, " .. total .. " entries")
+-- Page
+ns.db.board[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
+ns.db.board[wk - 6] = { x = { n = "X", c = 1 } }
+ns.ToggleWindow(5)
+local pg = LB.page
+check(MoonwardensFrame.current == 5 and pg and pg:IsShown(), "leaderboard page opens")
+check(ns.db.board[wk - 6] == nil, "old weeks pruned")
+check(pg.rows[1].name:GetText() == "Thalanor Oakheart" and pg.rows[1].n:GetText() == 50
+    and pg.rows[1].class:GetText() == "60 Warrior", "row 1")
+local mine
+for _, r in ipairs(pg.rows) do if r:IsShown() and r.name:GetText():find("(you)", 1, true) then mine = r end end
+check(mine and mine.hl:IsShown(), "my row highlighted")
+check(pg.sub:GetText():find("guild total |cffffd100" .. (50 + 12 + 5 + 5) .. "|r", 1, true) and pg.sub:GetText():find("left", 1, true), "subtitle: " .. pg.sub:GetText())
+check(pg.foot:GetText():find("Thalanor Oakheart|r (241)", 1, true), "last week's winner in the footer: " .. pg.foot:GetText())
+pg.tabs[2]._scripts.OnClick(pg.tabs[2])
+check(pg.sub:GetText():find("Final standings", 1, true) and pg.rows[1].n:GetText() == 241 and not pg.rows[2]:IsShown(), "last week view")
+pg.tabs[1]._scripts.OnClick(pg.tabs[1])
+SlashCmdList.MOONWARDENS("hk")
+check(W.prints[#W.prints]:find("5 honorable kills", 1, true), "/mw hk")
+ns.ToggleWindow()
+
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
 local errs = {}

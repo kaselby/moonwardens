@@ -7,6 +7,7 @@ ns.Comm = Comm
 Comm.PREFIX = "MWG1"
 Comm.PROTO = 1
 Comm.handlers = {}       -- type -> fn(fields, sender, senderKey, channel)
+Comm.lastHeard = {}      -- key -> time of their last message (any type)
 Comm.stats = { sent = 0, recv = 0, dropped = 0, ignored = 0 }
 
 local SPACING = 0.25     -- seconds between sends (LayerLab: 4/s passed with no loss)
@@ -86,6 +87,7 @@ local function onMessage(prefix, text, channel, sender)
         end
         return
     end
+    Comm.lastHeard[key] = ns.now()
     local h = Comm.handlers[kind]
     if not h then return end
     Comm.stats.recv = Comm.stats.recv + 1
