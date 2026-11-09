@@ -17,8 +17,8 @@ local MapWorld = {}
 ns.MapWorld = MapWorld
 
 local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
-local DOT_SIZE = 12
-local HOVER_RADIUS = 9
+local DOT_SIZE = 9
+local HOVER_RADIUS = 7
 local PANEL_WIDTH = 196
 
 ---------------------------------------------------------------------------
