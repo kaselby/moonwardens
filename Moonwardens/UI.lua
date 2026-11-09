@@ -180,8 +180,13 @@ local function buildStats(f)
         col:SetSize(30, 100)
         col:SetPoint("TOPLEFT", f.levelHead, "BOTTOMLEFT", (i - 1) * 36, -8)
         col.bar = col:CreateTexture(nil, "ARTWORK")
-        col.bar:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
-        col.bar:SetVertexColor(1, 0.82, 0)
+        -- Plain colour, not the status-bar texture: that one is a horizontal
+        -- strip and looks smeared and low-res when stretched upward.
+        col.bar:SetColorTexture(1, 1, 1, 1)
+        if not (CreateColor and pcall(col.bar.SetGradient, col.bar, "VERTICAL",
+                CreateColor(0.75, 0.5, 0, 1), CreateColor(1, 0.85, 0.2, 1))) then
+            col.bar:SetColorTexture(1, 0.82, 0, 1)
+        end
         col.bar:SetPoint("BOTTOM", 0, 14); col.bar:SetWidth(20)
         col.n = UI.Text(col, "small", nil, "CENTER"); col.n:SetPoint("BOTTOM", col.bar, "TOP", 0, 2)
         col.label = UI.Text(col, "small", UI.GREY, "CENTER"); col.label:SetPoint("BOTTOM", 0, 0); col.label:SetText(LEVEL_BANDS[i])
