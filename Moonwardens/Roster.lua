@@ -8,6 +8,9 @@ local count, loaded = 0, false
 local raceCache = {} -- guid -> { race, raceFile } (survives roster rebuilds)
 local lastBuild = -10
 
+-- Short race names for the Stats bars (Krylea, 11-09).
+Roster.RACE_SHORT = { ["High Order Skyborne"] = "Skyborne" }
+
 Roster.OFFICER_RANKS = { ["Glaivemistress"] = true, ["High Council"] = true, ["Warden-General"] = true }
 
 local function raceOf(guid)
@@ -80,7 +83,7 @@ function Roster.Stats(onlineOnly)
             end
             if m.raceFile or m.race then
                 local rk = m.raceFile or m.race
-                local e = s.race[rk] or { n = 0, label = m.race or rk }
+                local e = s.race[rk] or { n = 0, label = Roster.RACE_SHORT[m.race] or m.race or rk }
                 e.n = e.n + 1
                 s.race[rk] = e
             else

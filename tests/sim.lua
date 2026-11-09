@@ -32,6 +32,9 @@ check(ns.Roster.IsOfficer("sanalune silverwind"), "officer rank")
 local s = ns.Roster.Stats(false)
 check(s.total == 4 and s.online == 3 and s.max == 2, "stats totals")
 check(s.race.NightElf and s.race.NightElf.n == 1 and s.unknownRace == 2, "race counts")
+W.races["Player-1-04"] = { "High Order Skyborne", "Skyborne" }
+ns.Roster.Build()
+check(ns.Roster.Stats(false).race.Skyborne.label == "Skyborne", "race name shortened")
 check(s.level[7] == 2 and s.level[5] == 1 and s.level[4] == 1, "level bands")
 check(ns.Roster.Stats(true).total == 3, "online-only stats")
 
