@@ -1,0 +1,8 @@
+<Bindings>
+	<Binding name="MOONWARDENS_ALERT" header="MOONWARDENS" category="ADDONS">
+		Moonwardens.Alert.Send()
+	</Binding>
+	<Binding name="MOONWARDENS_RESPOND" category="ADDONS">
+		Moonwardens.Alert.Respond()
+	</Binding>
+</Bindings>

@@ -285,6 +285,91 @@ W.units = {}
 SlashCmdList.MOONWARDENS("layer")
 check(W.prints[#W.prints]:find("experimental", 1, true), "/mw layer")
 
+---------------------------------------------------------------------------
+-- Phase 4: alerts
+---------------------------------------------------------------------------
+local A = ns.Alert
+W.pos = { 0.5, 0.5 }
+W.advance(1)
+local function sentWhere(kind) local m = lastSent(kind); return m end
+-- Sending
+A.Send()
+W.advance(0.5)
+local am = sentWhere("A")
+check(am and am.ch == "GUILD" and am.m:match("^A|1|%d+|1440|0%.5000|0%.5000|%d+|help$"), "A sent: " .. tostring(am and am.m))
+local aid = am.m:match("^A|1|(%d+)|")
+check(A.Active() and MoonwardensAlertButton.border:IsShown(), "button glows while active")
+check(MoonwardensAlertList:IsShown(), "responder list open")
+-- A responder
+W.fire("CHAT_MSG_ADDON", "MWG1", "R|1|" .. aid .. "|1440|0.5050|0.5000", "WHISPER", "Thalanor-Oakheart")
+check(A.Active().order[1] and A.Active().order[1].key == "thalanor oakheart" and A.Active().order[1].dist == 29, "responder listed with distance")
+check(W.invites[#W.invites] == "Thalanor-Oakheart", "auto-invite")
+W.fire("CHAT_MSG_ADDON", "MWG1", "R|1|999999|1440|0.5|0.5", "WHISPER", "Caelith-Shade")
+check(#A.Active().order == 1, "R for another alert id ignored")
+-- Full party: convert to raid, then invite
+W.group = { "Thalanor Oakheart", "A B", "C D", "E F" }
+W.fire("CHAT_MSG_ADDON", "MWG1", "R|1|" .. aid .. "|1440|0.5|0.5", "WHISPER", "Caelith-Shade")
+check(W.converted == 1 and W.invites[#W.invites] == "Caelith-Shade", "converted to raid at 5, then invited")
+local nInv = #W.invites
+A.InviteAll()
+check(#W.invites == nInv + 1 and W.invites[#W.invites] == "Caelith-Shade", "invite all skips people in the group")
+W.group, W.raid = {}, false
+-- Ping again keeps the id
+local nA = countSent("A")
+A.Send()
+W.advance(0.5)
+check(countSent("A") == nA + 1 and sentWhere("A").m:match("^A|1|(%d+)|") == aid, "ping again, same id")
+-- Expiry ends it
+W.advance(121)
+check(not A.Active() and sentWhere("E") and sentWhere("E").m == "E|1|" .. aid, "expires after 2 min with E")
+check(not MoonwardensAlertList:IsShown(), "list closes")
+
+-- Receiving
+W.sounds = {}
+local function alertFrom(name, id, x, y, layer)
+    W.fire("CHAT_MSG_ADDON", "MWG1", ("A|1|%s|1440|%.4f|%.4f|%d|help"):format(id, x, y, layer or 0), "GUILD", name)
+end
+alertFrom("Thalanor-Oakheart", "111", 0.5, 0.5 + 240 / 3844)
+local c = A.Current()
+check(c and c.name == "Thalanor Oakheart" and math.abs(c.dist - 240) < 1 and c.dir == "south", "alert received: distance, direction")
+check(#W.sounds == 1, "chime")
+check(W.prints[#W.prints]:find("Thalanor Oakheart needs help", 1, true) and W.prints[#W.prints]:find("240 yd S", 1, true), "chat line: " .. W.prints[#W.prints])
+check(MoonwardensAlertBanner:IsShown() and MoonwardensAlertBanner.title:GetText():find("needs help", 1, true), "banner shown")
+W.advance(0.2)
+check(MoonwardensAlertBanner.sub:GetText():find("Ashenvale - 240 yards south", 1, true), "banner subtitle: " .. tostring(MoonwardensAlertBanner.sub:GetText()))
+local _, _, pip = ns.MapMini.Debug()
+check(pip:IsShown() and pip._point and math.abs(pip._point[5] + (50 - 6)) < 0.5, "minimap pip on the edge, toward the sender (south)")
+-- Spam guard: a new alert from the same sender within 30 s is ignored
+alertFrom("Thalanor-Oakheart", "112", 0.5, 0.5)
+check(A.Current().id == "111", "spam guard")
+-- Out of range / other zone
+alertFrom("Caelith-Shade", "200", 0.99, 0.99)
+check(A.Current().key == "thalanor oakheart", "far alert ignored")
+W.fire("CHAT_MSG_ADDON", "MWG1", "A|1|201|1439|0.5|0.5|0|help", "GUILD", "Caelith-Shade")
+check(A.Current().key == "thalanor oakheart", "other zone ignored")
+-- Respond
+ns.db.autoAccept = true
+A.Respond()
+W.advance(0.5)
+local rm = sentWhere("R")
+check(rm and rm.ch == "WHISPER" and rm.to == "Thalanor-Oakheart" and rm.m:match("^R|1|111|1440|"), "R whispered to the sender")
+check(MoonwardensAlertBanner.respond:GetText() == "Responded", "button says Responded")
+W.fire("PARTY_INVITE_REQUEST", "Caelith-Shade")
+check(W.accepted == 0, "no auto-accept from someone else")
+W.fire("PARTY_INVITE_REQUEST", "Thalanor-Oakheart")
+check(W.accepted == 1 and W.popupsHidden[1] == "PARTY_INVITE", "auto-accept from the sender")
+ns.db.autoAccept = false
+-- Banner fades after 20 s; E clears the pip
+W.advance(20)
+check(not MoonwardensAlertBanner:IsShown(), "banner gone after 20 s")
+check(A.Current() ~= nil, "alert still open after the banner")
+W.fire("CHAT_MSG_ADDON", "MWG1", "E|1|111", "GUILD", "Thalanor-Oakheart")
+W.advance(0.1)
+check(A.Current() == nil and not pip:IsShown(), "E ends it, pip gone")
+-- Direction helper
+check(A.Direction(1, 0) == "east" and A.Direction(0, -1) == "north" and A.Direction(-1, 1) == "southwest", "compass")
+check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Respond()", 1, true), "keybinds file")
+
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
 local errs = {}

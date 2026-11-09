@@ -15,7 +15,7 @@ local HOVER_RADIUS = 6
 local OUTDOOR = { [0] = 466.67, 400, 333.33, 266.67, 200, 133.33 }
 local INDOOR = { [0] = 300, 240, 180, 120, 80, 50 }
 
-local holder, driver
+local holder, driver, pip
 local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
@@ -78,8 +78,36 @@ function MapMini.Offset(x, y, px, py, w, h, pxPerYard, facing)
     return dx, dy
 end
 
+-- Alert pip: points at the sender of an alert I received, on the minimap
+-- edge when they're out of range, pulsing until the alert expires.
+local function updatePip(map, px, py, w, h, ppy, facing, half)
+    local am, ax, ay
+    if ns.Alert then am, ax, ay = ns.Alert.PipTarget() end
+    if not am or am ~= map then pip:Hide() return end
+    local dx, dy = MapMini.Offset(ax, ay, px, py, w, h, ppy, facing)
+    local edge = half - 6
+    local d = math.sqrt(dx * dx + dy * dy)
+    if d > edge then dx, dy = dx * edge / d, dy * edge / d end
+    pip:SetPoint("CENTER", holder, "CENTER", dx, dy)
+    pip:SetAlpha(0.55 + 0.45 * math.abs(math.sin(ns.now() * 3)))
+    pip:Show()
+end
+
 function MapMini.Update()
-    if not ns.db.minimapDots or inInstance() then hideFrom(0); return end
+    if inInstance() then hideFrom(0); pip:Hide(); return end
+    local map, px, py = ns.Position.ReadMine()
+    if map and px then
+        local w, h = MapMini.ZoneSize(map)
+        if w then
+            local half = Minimap:GetWidth() / 2
+            local facing = rotating() and ns.try(GetPlayerFacing) or nil
+            if facing and type(facing) ~= "number" then facing = nil end
+            updatePip(map, px, py, w, h, half / MapMini.ViewRadius(), facing, half)
+        end
+    else
+        pip:Hide()
+    end
+    if not ns.db.minimapDots then hideFrom(0); return end
     local map, px, py = ns.Position.ReadMine()
     if not (map and px and py) then hideFrom(0); return end
     local w, h = MapMini.ZoneSize(map)
@@ -128,9 +156,13 @@ ns.onLogin(function()
     holder = CreateFrame("Frame", nil, Minimap)
     holder:SetAllPoints(Minimap)
     holder:SetFrameLevel((Minimap:GetFrameLevel() or 1) + 5)
+    pip = ns.NewDot(holder, 13)
+    pip.fill:SetVertexColor(1, 0.25, 0.1, 1)
+    pip:SetFrameLevel(holder:GetFrameLevel() + 2)
+    pip:Hide()
     driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", ns.guard(onUpdate, "minimap"))
 end, "minimap")
 
 -- For tests.
-function MapMini.Debug() return dots, used end
+function MapMini.Debug() return dots, used, pip end

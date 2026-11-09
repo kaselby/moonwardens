@@ -231,4 +231,26 @@ C_NamePlate = { GetNamePlates = function()
 end }
 W.cleu = nil
 function CombatLogGetCurrentEventInfo() return unpack(W.cleu) end
+-- Group, invites, sounds, bindings
+W.group = {}          -- list of "First Surname" in my party (not me)
+W.raid = false
+W.invites, W.sounds, W.converted, W.accepted, W.popupsHidden = {}, {}, 0, 0, {}
+function GetNumGroupMembers() return #W.group > 0 and #W.group + 1 or 0 end
+function IsInRaid() return W.raid end
+local oldUnitName = UnitName
+function UnitName(u)
+    local i = u:match("^party(%d)$") or u:match("^raid(%d+)$")
+    if i then
+        local n = W.group[tonumber(i)]
+        if n then local a, b = n:match("(%S+) (%S+)"); return a, b end
+        return nil
+    end
+    return oldUnitName(u)
+end
+function InviteUnit(name) table.insert(W.invites, name) end
+function ConvertToRaid() W.converted = W.converted + 1; W.raid = true end
+function AcceptGroup() W.accepted = W.accepted + 1 end
+function StaticPopup_Hide(w) table.insert(W.popupsHidden, w) end
+function PlaySound(id) table.insert(W.sounds, id) end
+function GetBindingKey(b) if b == "MOONWARDENS_RESPOND" then return "ALT-R" end end
 return W
