@@ -226,3 +226,23 @@ ns.slash.where = { help = "where guildies with the addon are", fn = function()
     ns.print(("%d guildies with the addon are sharing their position."):format(n))
     for z, c in pairs(zones) do ns.print(("  %s: %d"):format(z, c)) end
 end }
+
+-- /mw test: three online guildies placed around me for 50 s (until they go
+-- stale), so the dots, tooltip and panel can be checked alone.
+ns.slash.test = { help = "show three test dots near you for 50 s", fn = function()
+    local map, x, y = Position.ReadMine()
+    if not (map and x) then ns.print("can't read your position here.") return end
+    local picks = {}
+    for key, m in pairs(ns.Roster.All()) do
+        if m.online and key ~= ns.meKey and #picks < 3 then picks[#picks + 1] = key end
+    end
+    if #picks == 0 then ns.print("no other guildies online to borrow for the test.") return end
+    local spots = { { 0.01, 0 }, { -0.008, 0.008 }, { 0, -0.012 } }
+    local myL = me.layer and me.layer > 0 and me.layer or 1
+    local layers = { myL, myL + 1, 0 }
+    for i, key in ipairs(picks) do
+        guildies[key] = { key = key, map = map, x = x + spots[i][1], y = y + spots[i][2],
+            layer = layers[i], flags = i == 1 and Position.FLAG_COMBAT or 0, at = ns.now() }
+    end
+    ns.print(("test dots: %d guildies placed around you on the world map and minimap for 50 s."):format(#picks))
+end }

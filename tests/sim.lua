@@ -225,6 +225,8 @@ W.advance(0.2)
 check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")
 ns.db.minimapDots = true
 ns.Layer = nil
+SlashCmdList.MOONWARDENS("test")
+check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test")
 
 local errs = {}
 for _, line in ipairs(W.prints) do if line:find("error", 1, true) then errs[#errs + 1] = line end end
