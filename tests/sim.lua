@@ -262,12 +262,9 @@ W.advance(2.1)
 check(Lr.Mine(1440) == 7075, "one NPC with a new number doesn't switch")
 W.fire("NAME_PLATE_UNIT_ADDED", "n1")
 check(Lr.Mine(1440) == 7075, "same NPC again doesn't switch")
-W.cleu = { 0, "SWING_DAMAGE", false, npc(7062, "C2"), "Mob", 0xa48, 0, "Player-0-1-2", "Me", 0x511, 0 }
-W.fire("COMBAT_LOG_EVENT_UNFILTERED")
-check(Lr.Mine(1440) == 7062, "second NPC (combat log) switches")
-W.cleu = { 0, "SWING_DAMAGE", false, npc(7001, "D1"), "Wolf", 0x1111, 0, npc(7001, "D2"), "Pet", 0x1111, 0 }
-W.fire("COMBAT_LOG_EVENT_UNFILTERED")
-check(Lr.Mine(1440) == 7062, "player-controlled in combat log ignored")
+W.units.target = { guid = npc(7062, "C2") }
+W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7062, "second NPC switches")
 W.plates = {}
 -- Tooltip, panel label
 MoonwardensMinimapButton._scripts.OnEnter(MoonwardensMinimapButton)
@@ -287,6 +284,8 @@ check(Lr.Mine(1440) == 0, "forgotten after 10 min")
 W.units = {}
 SlashCmdList.MOONWARDENS("layer")
 check(W.prints[#W.prints]:find("experimental", 1, true), "/mw layer")
+
+check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
 local errs = {}
 for _, line in ipairs(W.prints) do if line:find("error", 1, true) then errs[#errs + 1] = line end end

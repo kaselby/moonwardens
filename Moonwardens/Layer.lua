@@ -13,8 +13,6 @@ ns.Layer = Layer
 
 local MAX_AGE = 600
 local NEED = 2                 -- distinct NPC GUIDs to accept a new layer
-local CLEU_PER_SEC = 20
-local CONTROL_PLAYER, TYPE_NPC = 0x100, 0x800
 
 local state = {}               -- { map, layer, at, n }
 local cand = {}                -- { layer, guids = {}, n }
@@ -101,25 +99,9 @@ function Layer.ScanPlates()
     end
 end
 
--- Combat log: only NPCs not controlled by a player, and only a sample (a
--- big fight fires thousands of these a second).
-local cleuSec, cleuN = -1, 0
-local function onCombatLog()
-    if not (CombatLogGetCurrentEventInfo and bit and bit.band) then return end
-    local sec = math.floor(ns.now())
-    if sec ~= cleuSec then cleuSec, cleuN = sec, 0 end
-    cleuN = cleuN + 1
-    if cleuN > CLEU_PER_SEC then return end
-    local r = { pcall(CombatLogGetCurrentEventInfo) }
-    if not r[1] then return end
-    local function side(guid, flags)
-        if type(flags) ~= "number" or not ns.readable(flags) then return end
-        if bit.band(flags, TYPE_NPC) == 0 or bit.band(flags, CONTROL_PLAYER) ~= 0 then return end
-        Layer.Observe(guid, "cleu")
-    end
-    side(r[5], r[7])     -- sourceGUID, sourceFlags (r[1] is pcall's ok)
-    side(r[9], r[11])    -- destGUID, destFlags
-end
+-- No combat log: 12.x removed COMBAT_LOG_EVENT_UNFILTERED for addons, LayerLab
+-- never got one sighting from it on Forever, and registering it is the likely
+-- cause of the ADDON_ACTION_FORBIDDEN "UNKNOWN()" seen with 0.3.0 (11-09).
 
 -- "Layer 2 (7075)" for the minimap button tooltip.
 function Layer.TooltipLine()
@@ -138,7 +120,6 @@ ns.onLogin(function()
     ns:On("PLAYER_SOFT_ENEMY_CHANGED", function() observeUnit("softenemy", "soft") end)
     ns:On("PLAYER_SOFT_FRIEND_CHANGED", function() observeUnit("softfriend", "soft") end)
     ns:On("PLAYER_SOFT_INTERACT_CHANGED", function() observeUnit("softinteract", "soft") end)
-    ns:On("COMBAT_LOG_EVENT_UNFILTERED", onCombatLog)
     ns:On("ZONE_CHANGED_NEW_AREA", function() reset("zone") end)
     ns:On("PLAYER_ENTERING_WORLD", function() reset("loading") end)
     ns:On("SHARD_TRANSFER", function() reset("shard transfer") end)
