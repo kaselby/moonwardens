@@ -421,6 +421,19 @@ ns.onLogin(function()
     ns.every(1, function() if active and ns.now() - active.at >= LIFETIME then Alert.End() end end, "alert expiry")
 end, "alert")
 
+ns.slash.button = { help = "show the alert button and put it back at the centre of the screen", fn = function()
+    if not button then ns.print("the alert button wasn't built; there should be an error in chat from login.") return end
+    ns.db.alertButton = true
+    ns.db.alertButtonPos = nil
+    button:ClearAllPoints()
+    button:SetPoint("CENTER", UIParent, "CENTER", 200, 0)
+    savePos()
+    Alert.UpdateButton()
+    local l, b = button:GetLeft(), button:GetBottom()
+    ns.print(("alert button shown at the centre-right of the screen (shown=%s, visible=%s, strata=%s, left=%s, bottom=%s). Drag it where you want it."):format(
+        tostring(button:IsShown()), tostring(button:IsVisible()), tostring(button:GetFrameStrata()), tostring(l and math.floor(l)), tostring(b and math.floor(b))))
+end }
+
 ns.slash.alert = { help = "send an alert (same as the button)", fn = function() Alert.Send() end }
 ns.slash.respond = { help = "answer the last alert", fn = function() Alert.Respond() end }
 
