@@ -68,5 +68,167 @@ check(#GameTooltip.lines >= 3, "minimap tooltip")
 W.advance(130)
 check(W.rosterRequests >= 2, "roster re-requested")
 
+
+---------------------------------------------------------------------------
+-- Phase 2: positions
+---------------------------------------------------------------------------
+local P = ns.Position
+local function lastSent(kind)
+    for i = #W.sent, 1, -1 do if W.sent[i].m:sub(1, #kind + 1) == kind .. "|" then return W.sent[i], i end end
+end
+local function countSent(kind)
+    local n = 0
+    for _, m in ipairs(W.sent) do if m.m:sub(1, #kind + 1) == kind .. "|" then n = n + 1 end end
+    return n
+end
+W.pos = { 0.52, 0.5 }
+W.advance(4)
+local m = lastSent("P")
+check(m and m.m == "P|1|1440|0.5200|0.5000|0|4|60" and m.ch == "GUILD", "own P sent: " .. tostring(m and m.m))
+local before = countSent("P")
+W.advance(10)
+check(countSent("P") == before, "standing still: no P for 10 s")
+W.advance(6)
+check(countSent("P") == before + 1, "standing still: P every 15 s")
+before = countSent("P")
+W.pos = { 0.51, 0.5 }
+W.advance(4)
+check(countSent("P") == before + 1 and lastSent("P").m:find("0.5100", 1, true), "moved: P within 3 s")
+W.combat = true
+W.advance(2.5)
+check(lastSent("P").m:match("|(%d+)|60$") == "5", "combat flag sent at once")
+W.combat = false
+W.instance = true
+W.advance(2)
+check(lastSent("Q") and lastSent("Q").m == "Q|1", "Q in instance")
+local qAt = select(2, lastSent("Q"))
+W.advance(5)
+check(select(2, lastSent("Q")) == qAt and select(2, lastSent("P")) < qAt, "nothing more while in instance")
+W.instance = false
+W.advance(2)
+check(select(2, lastSent("P")) > qAt, "P again after the instance")
+W.fire("PLAYER_LEAVING_WORLD")
+check(lastSent("Q") and select(2, lastSent("Q")) > qAt, "Q sent at once on loading screen")
+W.advance(2)
+
+-- Receiving
+local function recv(text, from) W.fire("CHAT_MSG_ADDON", "MWG1", text, "GUILD", from) end
+recv("P|1|1440|0.4000|0.6000|0|1|60", "Thalanor-Oakheart")
+recv("P|1|1440|0.4500|0.5000|0|0|33", "Caelith-Shade")
+recv("P|1|1440|0.3|0.3|0|0|60", "Random-Stranger")
+recv("P|1|1440|7|0.3|0|0|60", "Caelith-Shade")
+recv("P|1|1440|0.2|0.2|0|0|41", "Velanya-Dawnleaf")   -- offline on the roster
+local g = P.Get("thalanor oakheart")
+check(g and g.x == 0.4 and g.y == 0.6 and g.level == 60 and P.HasFlag(g, P.FLAG_COMBAT), "P stored")
+check(P.Get("caelith shade").x == 0.45, "bad P ignored")
+check(P.Get("random stranger") == nil, "stranger's P ignored")
+check(P.CountInMyZone() == 2, "count in my zone (offline member dropped): " .. tostring(P.CountInMyZone()))
+MoonwardensMinimapButton._scripts.OnEnter(MoonwardensMinimapButton)
+check(table.concat(GameTooltip.lines, "\n"):find("2 in your zone", 1, true), "minimap tooltip zone count")
+recv("Q|1", "Caelith-Shade")
+check(P.Get("caelith shade") == nil, "Q drops the dot")
+recv("P|1|1440|0.4500|0.5000|0|0|33", "Caelith-Shade")
+W.advance(55)
+check(P.CountInMyZone() == 0, "stale dots dropped")
+
+-- Layers seen through positions (a stand-in detector says I'm on 7)
+ns.Layer = { Mine = function() return 7 end }
+W.advance(1.5)
+recv("P|1|1440|0.4000|0.6000|7|0|60", "Thalanor-Oakheart")
+recv("P|1|1440|0.4500|0.5000|3|0|33", "Caelith-Shade")
+local list, unknown = P.LayersIn(1440)
+check(#list == 2 and list[1].layer == 3 and list[1].label == "Layer 1" and list[2].label == "Layer 2" and list[2].mine
+    and list[2].n == 2 and unknown == 0, "layers in zone, labelled by rank")
+check(P.Relation(P.Get("thalanor oakheart")) == "same" and P.Relation(P.Get("caelith shade")) == "other", "relation same/other")
+recv("P|1|1440|0.4500|0.5000|0|0|33", "Caelith-Shade")
+check(P.Relation(P.Get("caelith shade")) == "unknown", "relation unknown")
+recv("P|1|1440|0.4500|0.5000|3|0|33", "Caelith-Shade")
+
+-- Conversion between maps
+local cx, cy = ns.MapWorld.Convert(1440, 0.5, 0.5, 1414)
+check(cx and math.abs(cx - (20000 + 2883.5) / 40000) < 1e-6 and math.abs(cy - (10000 + 1922) / 30000) < 1e-6, "zone to continent")
+check(ns.MapWorld.Convert(1440, 0.5, 0.5, 1439) == nil, "off the other zone's map")
+
+---------------------------------------------------------------------------
+-- World map
+---------------------------------------------------------------------------
+WorldMapFrame:Show()
+W.advance(0.3)
+local dots, used, panel, root = ns.MapWorld.Debug()
+check(used == 2, "two dots on the world map: " .. tostring(used))
+local tdot
+for i = 1, used do if dots[i].g.key == "thalanor oakheart" then tdot = dots[i] end end
+check(tdot and tdot._point[2] == root and tdot._point[3] == "TOPLEFT"
+    and math.abs(tdot._point[4] - 400) < 1e-6 and math.abs(tdot._point[5] + 0.6 * 667) < 1e-6, "dot placed on the canvas")
+check(tdot.rel == "same" and tdot:GetAlpha() ~= 0.4, "same layer dot solid")
+check(panel and panel:IsShown() and panel.head:GetText() == "Layers in Ashenvale", "side panel heading")
+check(panel.cards[1].name:GetText() == "Layer 1" and panel.cards[2].name:GetText():find("Layer 2", 1, true)
+    and panel.cards[2].name:GetText():find("you", 1, true) and panel.cards[2].count:GetText() == "2 guildies", "layer cards")
+
+-- Hover
+W.cursor = { tdot._cx + 3, tdot._cy - 2 }
+W.advance(0.1)
+local tip = table.concat(GameTooltip.lines, "\n")
+check(GameTooltip:GetOwner() ~= nil and tip:find("Thalanor Oakheart", 1, true) and tip:find("Layer 2 (same as you)", 1, true)
+    and tip:find("<Moonwardens> Sentinel", 1, true), "hover tooltip")
+W.cursor = { 0, 0 }
+W.advance(0.1)
+
+-- Other layer hidden by the checkbox
+ns.db.otherLayers = false
+W.advance(0.3)
+dots, used = ns.MapWorld.Debug()
+check(used == 1 and dots[1].g.key == "thalanor oakheart", "other layer hidden")
+ns.db.otherLayers = true
+
+-- Continent view: converted, panel says how many
+W.shownMap = 1414
+W.advance(0.3)
+dots, used, panel = ns.MapWorld.Debug()
+check(used == 2 and panel.empty:GetText():find("2 guildies on this map", 1, true), "continent view")
+W.shownMap = 1440
+
+-- Kill switch
+SlashCmdList.MOONWARDENS("map off")
+dots, used = ns.MapWorld.Debug()
+check(ns.db.mapKill and used == 0 and not panel:IsShown(), "map off hides everything")
+WorldMapFrame:Hide(); WorldMapFrame:Show()
+W.advance(0.3)
+dots, used = ns.MapWorld.Debug()
+check(used == 0 and not panel:IsShown(), "map stays off on reopen")
+SlashCmdList.MOONWARDENS("map on")
+WorldMapFrame:Hide(); WorldMapFrame:Show()
+W.advance(0.3)
+dots, used = ns.MapWorld.Debug()
+check(used == 2 and panel:IsShown(), "map on again")
+WorldMapFrame:Hide()
+W.advance(0.1)
+
+---------------------------------------------------------------------------
+-- Minimap (width 100 -> 50 px radius = 233.33 yd)
+---------------------------------------------------------------------------
+W.pos = { 0.5, 0.5 }
+local ppy = 50 / 233.33
+local ex, ey = ns.MapMini.Offset(0.5 + 10 / 5767, 0.5, 0.5, 0.5, 5767, 3844, ppy)
+check(math.abs(ex - 10 * ppy) < 1e-6 and math.abs(ey) < 1e-9, "10 yd east")
+local nx, ny = ns.MapMini.Offset(0.5, 0.5 - 20 / 3844, 0.5, 0.5, 5767, 3844, ppy)
+check(math.abs(ny - 20 * ppy) < 1e-6 and math.abs(nx) < 1e-9, "20 yd north is up")
+local rx, ry = ns.MapMini.Offset(0.5 + 10 / 5767, 0.5, 0.5, 0.5, 5767, 3844, ppy, math.pi / 2)
+check(math.abs(rx) < 1e-6 and math.abs(ry - 10 * ppy) < 1e-6, "rotation by facing")
+recv("P|1|1440|" .. ("%.4f"):format(0.5 + 30 / 5767) .. "|0.5000|7|0|60", "Thalanor-Oakheart")
+recv("P|1|1440|0.9000|0.5000|3|0|33", "Caelith-Shade")   -- far away
+W.advance(0.2)
+local md, mused = ns.MapMini.Debug()
+check(mused == 1 and md[1].g.key == "thalanor oakheart" and math.abs(md[1]._point[4] - 30 * ppy) < 0.3, "minimap: near dot placed, far one hidden")
+ns.db.minimapDots = false
+W.advance(0.2)
+check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")
+ns.db.minimapDots = true
+ns.Layer = nil
+
+local errs = {}
+for _, line in ipairs(W.prints) do if line:find("error", 1, true) then errs[#errs + 1] = line end end
+check(#errs == 0, "no errors printed by the addon:\n  " .. table.concat(errs, "\n  "))
+
 print(("%d passed, %d failed"):format(passes, fails))
 if fails == 0 then print("ALL PASS") else os.exit(1) end

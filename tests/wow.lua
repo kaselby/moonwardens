@@ -20,7 +20,9 @@ Widget.__index = function(t, k)
     if v then return v end
     if type(k) == "string" and k:match("^Get") then return function() return 100 end end
     if type(k) == "string" and k:match("^Is") then return function(self) return self._shown ~= false end end
-    return function() end
+    -- Unknown methods (capitalised) are no-ops; unknown fields are nil.
+    if type(k) == "string" and k:match("^[A-Z]") then return function() end end
+    return nil
 end
 function Widget:SetScript(k, fn) self._scripts[k] = fn end
 function Widget:GetScript(k) return self._scripts[k] end
@@ -44,7 +46,18 @@ function Widget:GetHeight() return self._h or 100 end
 function Widget:SetSize(w, h) self._w, self._h = w, h end
 function Widget:SetWidth(w) self._w = w end
 function Widget:SetHeight(h) self._h = h end
-function Widget:GetCenter() return 500, 400 end
+function Widget:GetCenter() return self._cx or 500, self._cy or 400 end
+-- Points are remembered; a CENTER point with offsets also sets a fake centre
+-- (500 + x, 400 + y) so hover tests can aim the cursor at it.
+function Widget:SetPoint(p, a, b, c, d)
+    self._point = { p, a, b, c, d }
+    if p == "CENTER" and type(c) == "number" then self._cx, self._cy = 500 + c, 400 + d end
+end
+function Widget:ClearAllPoints() self._point = nil end
+function Widget:SetParent(p) self._parent = p end
+function Widget:GetParent() return self._parent end
+function Widget:SetAlpha(a) self._alpha = a end
+function Widget:GetAlpha() return self._alpha or 1 end
 function Widget:GetEffectiveScale() return 1 end
 function Widget:GetName() return self._name end
 function Widget:GetID() return self._id end
@@ -58,7 +71,9 @@ function W.new(kind, name)
 end
 function CreateFrame(kind, name, parent, template)
     if template and W.missingTemplates and W.missingTemplates[template] then error("no template " .. template) end
-    return W.new(kind, name)
+    local f = W.new(kind, name)
+    f._parent = parent
+    return f
 end
 UIParent = W.new("Frame", "UIParent")
 Minimap = W.new("Frame", "Minimap")
@@ -66,14 +81,16 @@ WorldFrame = W.new("Frame", "WorldFrame")
 GameTooltip = W.new("GameTooltip", "GameTooltip")
 GameTooltip.lines = {}
 function GameTooltip:AddLine(t) table.insert(self.lines, t) end
-function GameTooltip:SetOwner() self.lines = {} end
+function GameTooltip:SetOwner(o) self.lines = {}; self._owner = o end
+function GameTooltip:GetOwner() return self._owner end
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) table.insert(W.prints, m) end }
 UISpecialFrames = {}
 SlashCmdList = {}
 RAID_CLASS_COLORS = setmetatable({}, { __index = function() return { r = 1, g = 1, b = 1 } end })
 SOUNDKIT = {}
 function PlaySound() end
-function GetCursorPosition() return 0, 0 end
+W.cursor = { 0, 0 }
+function GetCursorPosition() return W.cursor[1], W.cursor[2] end
 function SetPortraitToTexture() end
 function PanelTemplates_SetNumTabs() end
 function PanelTemplates_SetTab() end
@@ -103,6 +120,11 @@ function W.advance(seconds, step)
             end
         end
         for _, t in ipairs(due) do t.fn(t) end
+        for i = 1, #W.frames do
+            local f = W.frames[i]
+            local u = f._scripts.OnUpdate
+            if u and f._shown ~= false then u(f, step) end
+        end
     end
 end
 function W.fire(event, ...)
@@ -143,4 +165,57 @@ C_ChatInfo = {
         return 0
     end,
 }
+-- Position and maps. World coordinates are a flat plane: each map is a
+-- rectangle (origin + size in yards), enough to test conversions.
+W.map, W.pos = 1440, { 0.5, 0.5 }
+W.maps = {
+    [1440] = { name = "Ashenvale", ox = 0, oy = 0, w = 5767, h = 3844 },
+    [1414] = { name = "Kalimdor", ox = -20000, oy = -10000, w = 40000, h = 30000 },
+    [1439] = { name = "Darkshore", ox = 0, oy = -6000, w = 6000, h = 6000 },
+}
+function CreateVector2D(x, y)
+    return { x = x, y = y, GetXY = function(v) return v.x, v.y end }
+end
+C_Map = {
+    GetBestMapForUnit = function() return W.map end,
+    GetPlayerMapPosition = function(map) if not W.pos then return nil end return CreateVector2D(W.pos[1], W.pos[2]) end,
+    GetMapInfo = function(map) return W.maps[map] and { name = W.maps[map].name } end,
+    GetWorldPosFromMapPos = function(map, v)
+        local m = W.maps[map]
+        if not m then return nil end
+        return 1, CreateVector2D(m.ox + v.x * m.w, m.oy + v.y * m.h)
+    end,
+    GetMapPosFromWorldPos = function(cont, world, map)
+        local m = W.maps[map]
+        if not m then return nil end
+        return map, CreateVector2D((world.x - m.ox) / m.w, (world.y - m.oy) / m.h)
+    end,
+}
+W.instance = false
+function IsInInstance() if W.instance then return true, "party" end return false, "none" end
+W.combat = false
+function UnitAffectingCombat() return W.combat end
+function UnitIsDeadOrGhost() return false end
+function UnitLevel() return 60 end
+function GetGuildInfo() return "Moonwardens", "Warden-General", 0 end
+function IsIndoors() return false end
+W.radius = 233.33
+C_Minimap = { GetViewRadius = function() return W.radius end }
+W.cvars = { rotateMinimap = "0" }
+function GetCVar(k) return W.cvars[k] end
+W.facing = 0
+function GetPlayerFacing() return W.facing end
+
+WorldMapFrame = W.new("Frame", "WorldMapFrame")
+WorldMapFrame._shown = false
+WorldMapFrame.ScrollContainer = W.new("Frame")
+WorldMapFrame.ScrollContainer.Child = W.new("Frame")
+WorldMapFrame.ScrollContainer.Child:SetSize(1000, 667)
+W.shownMap = 1440
+function WorldMapFrame:GetMapID() return W.shownMap end
+-- Scripts may be hooked more than once; keep them all.
+function WorldMapFrame:HookScript(k, fn)
+    local old = self._scripts[k]
+    self._scripts[k] = old and function(...) old(...); fn(...) end or fn
+end
 return W

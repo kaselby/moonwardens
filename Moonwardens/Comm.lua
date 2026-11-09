@@ -43,6 +43,14 @@ function Comm.Send(fields, channel, target, kind)
     queue[#queue + 1] = { msg = msg, channel = channel, target = target, kind = kind }
 end
 
+-- Send at once, skipping the queue. Only for the last word before a loading
+-- screen or logout, when the queue won't get another pump.
+function Comm.SendNow(fields, channel, target)
+    if channel == "GUILD" and not IsInGuild() then return end
+    lastSend = ns.now()
+    return rawSend(table.concat(fields, "|"), channel, target)
+end
+
 -- Drain one message per SPACING. Called from a fast ticker.
 function Comm.Pump()
     if #queue == 0 or ns.now() - lastSend < SPACING or locked() then return end
