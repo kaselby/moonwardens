@@ -456,6 +456,25 @@ for _, c in ipairs(chunks) do
     if #table.concat({ "HS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
 end
 check(#chunks >= 4 and total == 40 and okLen, "chunks: " .. #chunks .. " messages, " .. total .. " entries")
+-- Any kill, not just honorable: PARTY_KILL, matched against the HK counter
+local base = LB.Mine()
+local function pk(victim) W.fire("PARTY_KILL", "Player-1-0001", victim) end
+pk("Player-9-00AA")                     -- a grey-level Horde: no HK
+W.advance(11)
+check(LB.Mine() == base + 1, "kill with no honour counted")
+pk("Player-9-00AB"); W.advance(1); W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+check(LB.Mine() == base + 2, "honorable kill seen twice (party kill, then HK) counted once")
+W.advance(11)
+W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(1); pk("Player-9-00AC")
+check(LB.Mine() == base + 3, "HK first, then party kill: counted once")
+W.advance(11)
+pk("Creature-0-7075-1-2-3346-A1")
+W.map = 1439; pk("Player-9-00AD"); W.map = 1440
+check(LB.Mine() == base + 3, "NPCs and other zones not counted")
+W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+check(LB.Mine() == base + 4, "HK alone still counts (party kill secret or missed)")
+W.advance(11)
+for k, e in pairs(ns.db.board[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
 -- Page
 ns.db.board[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
 ns.db.board[wk - 6] = { x = { n = "X", c = 1 } }
@@ -474,7 +493,7 @@ pg.tabs[2]._scripts.OnClick(pg.tabs[2])
 check(pg.sub:GetText():find("Final standings", 1, true) and pg.rows[1].n:GetText() == 241 and not pg.rows[2]:IsShown(), "last week view")
 pg.tabs[1]._scripts.OnClick(pg.tabs[1])
 SlashCmdList.MOONWARDENS("hk")
-check(W.prints[#W.prints]:find("5 honorable kills", 1, true), "/mw hk")
+check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
 
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")

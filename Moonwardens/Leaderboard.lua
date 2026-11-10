@@ -1,4 +1,5 @@
--- Leaderboard: honorable kills in Ashenvale, per week, shared through the guild.
+-- Leaderboard: Horde players killed in Ashenvale, per week, shared through the guild.
+-- Any kill counts, honorable or not (Krylea, 11-09): grey-level Horde too.
 -- H|1|week|count            GUILD: my own count this week
 -- HQ|1|week|attempt         GUILD: "send me the board"; one elected member replies
 -- HS|1|week|Name:n,Name:n   WHISPER: the board, in chunks under 255 bytes
@@ -95,16 +96,50 @@ local function scheduleH()
     end, "hk send")
 end
 
--- Read the session counter. PLAYER_PVP_KILLS_CHANGED fires twice per kill, so
--- we count the counter's rise, never the events. Kills from before login are
--- not ours to count (we don't know where they happened).
+-- Two sources, because neither is sure to work everywhere:
+--  * PARTY_KILL (attacker, victim GUIDs): a killing blow by me or my group.
+--    Counts any player, honour or not. May be secret where unit identity is
+--    restricted.
+--  * GetPVPSessionStats() honorable kills. PLAYER_PVP_KILLS_CHANGED fires
+--    twice per kill, so we count the counter's rise, never the events.
+-- The same kill usually shows up in both, within a second or two. Each
+-- counted kill waits up to MATCH seconds for its twin from the other source;
+-- a twin that arrives is absorbed, not counted again.
+local MATCH = 10
+local fromParty, fromHK = {}, {}   -- times of counted kills still waiting for a twin
+
+local function absorb(list)
+    local now = ns.now()
+    while list[1] and now - list[1] > MATCH do table.remove(list, 1) end
+    if list[1] then table.remove(list, 1); return true end
+    return false
+end
+
+local function count(from, other)
+    if absorb(other) then return end
+    from[#from + 1] = ns.now()
+    LB.Add(1)
+end
+
+function LB.PartyKill(attacker, victim)
+    if type(victim) ~= "string" or not ns.readable(victim) then return end
+    -- Only players. In open-world Ashenvale every player who can die to us is
+    -- Horde (no duels to the death, no free-for-all areas).
+    if victim:sub(1, 7) ~= "Player-" or not inAshenvale() then return end
+    count(fromParty, fromHK)
+end
+
+-- Kills on the HK counter from before login are not ours to count (we don't
+-- know where they happened).
 function LB.Read()
     local kills = ns.try(GetPVPSessionStats)
     if type(kills) ~= "number" then return end
     if lastCounter == nil then lastCounter = kills; return end -- baseline at login
     local d = kills >= lastCounter and kills - lastCounter or kills -- a drop = daily reset to 0
     lastCounter = kills
-    if d > 0 and inAshenvale() then LB.Add(d) end
+    if d > 0 and inAshenvale() then
+        for _ = 1, d do count(fromHK, fromParty) end
+    end
 end
 
 function LB.Add(n)
@@ -230,7 +265,7 @@ local function build(f)
     LB.page = f
     f.week = 0 -- 0 = this week, 1 = last week
     f.title = UI.Text(f, "big", UI.GOLD, "LEFT"); f.title:SetPoint("TOPLEFT", 0, 0)
-    f.title:SetText("Ashenvale Honorable Kills")
+    f.title:SetText("Horde Kills in Ashenvale")
     f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -22)
 
     f.tabs = {}
@@ -247,7 +282,7 @@ local function build(f)
     local function col(text, x, w, justify)
         local h = UI.Text(f, nil, UI.GOLD, justify); h:SetPoint("TOPLEFT", x, y); h:SetWidth(w); h:SetText(text)
     end
-    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT"); col("HKs", 440, 60, "RIGHT")
+    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT"); col("Kills", 440, 60, "RIGHT")
     local line = f:CreateTexture(nil, "ARTWORK"); line:SetColorTexture(0.35, 0.28, 0.08, 1)
     line:SetPoint("TOPLEFT", 0, y - 16); line:SetSize(508, 1)
 
@@ -321,7 +356,7 @@ local function refresh(f)
     else
         f.empty:Hide()
     end
-    local foot = "Counts kills made in Ashenvale by members who have the addon."
+    local foot = "Counts Horde killed in Ashenvale by you or your group, honour or not. Only members with the addon appear."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
@@ -343,6 +378,7 @@ ns.onLogin(function()
     prune()
     LB.Read() -- sets the baseline; kills from before login don't count
     ns:On("PLAYER_PVP_KILLS_CHANGED", LB.Read)
+    ns:On("PARTY_KILL", LB.PartyKill)
     ns.every(5, LB.Read, "hk poll")
     -- Announce and ask once the roster and some P messages are in.
     ns.after(15, function()
@@ -352,6 +388,6 @@ ns.onLogin(function()
     end, "hk login")
 end, "leaderboard")
 
-ns.slash.hk = { help = "my Ashenvale kills this week", fn = function()
-    ns.print(("%d honorable kills in Ashenvale this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
+ns.slash.hk = { help = "my Horde kills in Ashenvale this week", fn = function()
+    ns.print(("%d Horde kills in Ashenvale this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
 end }
