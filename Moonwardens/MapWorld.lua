@@ -410,7 +410,8 @@ function MapWorld.Refresh()
                 onMap.total = onMap.total + 1
                 if g.map == map then onMap.direct = onMap.direct + 1 end
                 local rel = ns.Position.Relation(g)
-                if ns.db.worldDots and L.w and (rel ~= "other" or ns.db.otherLayers) then
+                if ns.db.worldDots and L.w and (rel ~= "other" or ns.db.otherLayers)
+                        and not ns.Position.InMyGroup(g.key) then -- the game draws group members itself
                     n = n + 1
                     local d = dots[n]
                     if not d then d = ns.NewDot(root, DOT_SIZE); dots[n] = d end

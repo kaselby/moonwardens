@@ -121,7 +121,7 @@ function MapMini.Update()
     for _, g in pairs(ns.Position.All()) do
         if g.map == map then
             local rel = ns.Position.Relation(g)
-            if rel ~= "other" or ns.db.otherLayers then
+            if (rel ~= "other" or ns.db.otherLayers) and not ns.Position.InMyGroup(g.key) then
                 local dx, dy = MapMini.Offset(g.x, g.y, px, py, w, h, ppy, facing)
                 if dx * dx + dy * dy <= limit * limit then
                     n = n + 1

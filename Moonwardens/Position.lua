@@ -131,6 +131,34 @@ end
 
 function Position.Get(key) return guildies[key] end
 
+---------------------------------------------------------------------------
+-- Guildies in my party/raid. The game already draws group members on the
+-- world map and minimap, so our dots for them are hidden (no double dots)
+-- and come back as soon as they leave the group. Names use the same
+-- "First Surname" key as everything else (see ns.key).
+---------------------------------------------------------------------------
+local grouped = {}
+
+local function rebuildGroup()
+    local fresh = {}
+    local n = ns.try(GetNumGroupMembers) or 0
+    if n > 0 then
+        local raid = ns.try(IsInRaid) == true
+        local prefix = raid and "raid" or "party"
+        for i = 1, raid and n or (n - 1) do
+            local first, last = ns.try(UnitName, prefix .. i)
+            if type(first) == "string" then
+                if type(last) == "string" and ns.readable(last) and last ~= "" then first = first .. " " .. last end
+                local key = ns.key(first)
+                if key and key ~= ns.meKey then fresh[key] = true end
+            end
+        end
+    end
+    grouped = fresh
+end
+
+function Position.InMyGroup(key) return grouped[key] == true end
+
 function Position.CountInMyZone()
     if not me.map then return nil end
     local n = 0
@@ -209,6 +237,10 @@ end
 ns.onLogin(function()
     ns.Comm.handlers.P = onP
     ns.Comm.handlers.Q = onQ
+    rebuildGroup()
+    ns:On("GROUP_ROSTER_UPDATE", rebuildGroup)
+    -- Names can read as unknown for a moment after someone joins; recheck.
+    ns.every(2, rebuildGroup, "group members")
     ns.every(1, function() Position.Tick() end, "position")
     ns:On("ZONE_CHANGED_NEW_AREA", function() ns.after(1, function() Position.Tick(true) end, "position zone") end)
     -- Loading screen or logout: drop my dot now; PLAYER_ENTERING_WORLD brings it back.

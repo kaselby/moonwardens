@@ -236,6 +236,24 @@ W.advance(0.2)
 check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")
 ns.db.minimapDots = true
 ns.Layer = realLayer
+-- Guildies in my group: the game draws them, so our dots hide (guildie fix, 11-10)
+W.group = { "Thalanor Oakheart" }
+W.fire("GROUP_ROSTER_UPDATE")
+W.advance(0.3)
+check(select(2, ns.MapMini.Debug()) == 0, "minimap: grouped guildie not drawn twice")
+WorldMapFrame:Show(); W.advance(0.3)
+local gd, gused = ns.MapWorld.Debug()
+local hasT = false
+for i = 1, gused do if gd[i].g.key == "thalanor oakheart" then hasT = true end end
+check(not hasT, "world map: grouped guildie not drawn twice")
+W.group = {}
+W.fire("GROUP_ROSTER_UPDATE")
+W.advance(0.3)
+gd, gused = ns.MapWorld.Debug()
+hasT = false
+for i = 1, gused do if gd[i].g.key == "thalanor oakheart" then hasT = true end end
+check(hasT and select(2, ns.MapMini.Debug()) == 1, "dots come back after leaving the group")
+WorldMapFrame:Hide(); W.advance(0.1)
 SlashCmdList.MOONWARDENS("test")
 check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test")
 
