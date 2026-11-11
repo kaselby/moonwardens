@@ -20,6 +20,7 @@ local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
 local tipKey                -- hovered guildies in the tooltip we own, or nil
+local gameDrives = false    -- hooked the game's Minimap_OnUpdate (see below)
 
 ---------------------------------------------------------------------------
 -- Hover: guildies join the minimap's own tooltip, the way party members do.
@@ -71,7 +72,23 @@ local function gameHasLines()
     return type(lines) == "table" and ns.readable(lines) and #lines > 0
 end
 
--- Every hover tick: own GameTooltip only while the game isn't using it.
+-- The game's own minimap hover (Blizzard_Minimap, Forever and retail): while
+-- the mouse is over the minimap, Minimap_OnUpdate runs EVERY frame and does
+--   GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR"); GameTooltip:SetMinimapMouseover()
+-- which wipes any tooltip we showed a moment before (0.5.1, 0.5.2-test: the
+-- guildie tooltip never showed in game). So we add our lines right after it,
+-- every frame, in a hook: one tooltip, the game's lines (if any) then ours.
+local function afterGameHover()
+    if used == 0 or not holder or not holder:IsVisible() then return end
+    if GameTooltip:GetOwner() ~= UIParent then return end   -- (someone else's tooltip now)
+    local hits = ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
+    if #hits == 0 then return end
+    addLines(GameTooltip, hits)
+    GameTooltip:Show()
+end
+
+-- Every hover tick (clients without Minimap_OnUpdate only): own GameTooltip
+-- only while the game isn't using it.
 local function updateHover()
     local shown, owner = GameTooltip:IsShown(), GameTooltip:GetOwner()
     if shown and owner ~= holder then
@@ -230,7 +247,7 @@ local function onUpdate(_, elapsed)
     hoverAcc = hoverAcc + elapsed
     if hoverAcc >= 0.05 then
         hoverAcc = 0
-        updateHover()
+        if not gameDrives then updateHover() end
     end
 end
 
@@ -246,8 +263,14 @@ ns.onLogin(function()
     driver:SetScript("OnUpdate", ns.guard(onUpdate, "minimap"))
     -- Bumped name lines go back to normal size before anything else reuses them.
     ns.WatchTooltip(GameTooltip)
-    -- Our lines in the game's own minimap tooltip (see updateHover). Guarded:
+    -- Our lines after the game's minimap hover (see afterGameHover). Guarded:
     -- an error here must never break the game's tooltip.
+    if type(Minimap_OnUpdate) == "function" and hooksecurefunc then
+        hooksecurefunc("Minimap_OnUpdate", ns.guard(afterGameHover, "minimap tooltip"))
+        gameDrives = true
+        return
+    end
+    -- Otherwise: our lines in the game's minimap tooltip data (see updateHover).
     local kind = Enum and Enum.TooltipDataType and Enum.TooltipDataType.MinimapMouseover
     if kind and TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
         TooltipDataProcessor.AddTooltipPostCall(kind, ns.guard(onMinimapTooltip, "minimap tooltip"))

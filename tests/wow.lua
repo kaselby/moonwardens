@@ -90,6 +90,19 @@ function GameTooltip:SetOwner(o) self.lines = {}; self._owner = o end
 function GameTooltip:GetOwner() return self._owner end
 function GameTooltip:NumLines() return #self.lines end
 function GameTooltip:ClearLines() self.lines = {} end
+function hooksecurefunc(a, b, c)
+    local t, name, fn = _G, a, b
+    if type(a) == "table" then t, name, fn = a, b, c end
+    local orig = t[name]
+    t[name] = function(...) local r = { orig(...) }; fn(...); return unpack(r) end
+end
+-- The game's minimap hover (Blizzard_Minimap Minimap_OnUpdate): runs every frame
+-- the mouse is over the minimap; here, nothing of the game's is under the cursor.
+function GameTooltip:SetMinimapMouseover() end
+function Minimap_OnUpdate(self)
+    GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR")
+    GameTooltip:SetMinimapMouseover()
+end
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) table.insert(W.prints, m) end }
 UISpecialFrames = {}
 SlashCmdList = {}
