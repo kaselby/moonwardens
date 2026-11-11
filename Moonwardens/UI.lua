@@ -251,8 +251,7 @@ UI.SETTINGS = {
     { "worldDots", "Show guildies on the world map" },
     { "otherLayers", "Show guildies on other layers (faded)" },
     { "minimapDots", "Show guildies on the minimap" },
-    { "Research" },
-    { "dataCollection", "Help collect layer data (recommended)" },
+    -- Research section ("Help collect layer data") comes back with the data log (0.6).
 }
 
 local function buildSettings(f)

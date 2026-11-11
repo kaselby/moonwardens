@@ -2,7 +2,9 @@
 ## Title: Moonwardens
 ## Notes: Guild map, layers, alerts, stats and leaderboard for the Moonwardens. Type /mw.
 ## Author: Krylea
-## Version: 0.5.0
+## Version: 0.5.1
+## IconTexture: Interface\Icons\Spell_Nature_MoonGlow
+## X-License: All Rights Reserved
 ## SavedVariables: MoonwardensDB
 
 Core.lua

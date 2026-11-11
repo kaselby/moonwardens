@@ -1,0 +1,8 @@
+Moonwardens guild addon
+Copyright (c) 2026 Krylea. All rights reserved.
+
+This addon is made for members of the Moonwardens guild on WoW Forever.
+You may install and use it, and change your own copy for your own use.
+You may not redistribute, re-upload, publish, or share it or any modified
+version of it, in whole or in part, without written permission from the
+author. To share it with a guildie, send them the official download link.
