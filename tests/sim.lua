@@ -395,13 +395,24 @@ check(W.accepted == 0, "no auto-accept from someone else")
 W.fire("PARTY_INVITE_REQUEST", "Thalanor-Oakheart")
 check(W.accepted == 1 and W.popupsHidden[1] == "PARTY_INVITE", "auto-accept from the sender")
 ns.db.autoAccept = false
--- Banner fades after 20 s; E clears the pip
-W.advance(20)
-check(not MoonwardensAlertBanner:IsShown(), "banner gone after 20 s")
+-- Banner goes 3 s after answering; a ping again doesn't bring it back; E clears the pip
+check(MoonwardensAlertBanner:IsShown(), "banner still up just after answering")
+W.advance(3)
+check(not MoonwardensAlertBanner:IsShown(), "banner gone 3 s after answering")
+alertFrom("Thalanor-Oakheart", "111", 0.5, 0.5 + 240 / 3844)
+check(not MoonwardensAlertBanner:IsShown() and A.Current().responded, "ping again after answering: no banner")
 check(A.Current() ~= nil, "alert still open after the banner")
 W.fire("CHAT_MSG_ADDON", "MWG1", "E|1|111", "GUILD", "Thalanor-Oakheart")
 W.advance(0.1)
 check(A.Current() == nil and not pip:IsShown(), "E ends it, pip gone")
+-- Unanswered: the banner fades after 15 s
+W.advance(31)
+alertFrom("Thalanor-Oakheart", "113", 0.5, 0.5)
+W.advance(14)
+check(MoonwardensAlertBanner:IsShown(), "unanswered banner up at 14 s")
+W.advance(1.1)
+check(not MoonwardensAlertBanner:IsShown(), "unanswered banner gone after 15 s")
+W.fire("CHAT_MSG_ADDON", "MWG1", "E|1|113", "GUILD", "Thalanor-Oakheart")
 -- Direction helper
 check(A.Direction(1, 0) == "east" and A.Direction(0, -1) == "north" and A.Direction(-1, 1) == "southwest", "compass")
 check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Respond()", 1, true), "keybinds file")

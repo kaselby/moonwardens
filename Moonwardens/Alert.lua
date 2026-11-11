@@ -4,7 +4,7 @@
 -- E|1|id                      (GUILD)   ended by the sender or expired
 --
 -- Receivers: same zone, within half the zone's larger side. They get a
--- chime, a banner that fades after 20 s, a Respond button and keybind, a
+-- chime, a banner that fades after 15 s (3 s after answering), a Respond button and keybind, a
 -- minimap edge pip toward the sender, and one chat line. An alert lives 2 min.
 -- Sender: the alert button glows; a responder list builds as R arrives, with
 -- auto-invite / auto-raid, Invite all, Ping again, End alert.
@@ -13,7 +13,8 @@ local Alert = {}
 ns.Alert = Alert
 
 local LIFETIME = 120
-local BANNER_TIME = 20
+local BANNER_TIME = 15
+local AFTER_RESPOND = 3     -- the banner goes this long after you answer
 local SPAM_GUARD = 30
 local SOUND = 8959          -- SOUNDKIT.RAID_WARNING; to be chosen in testing
 
@@ -175,9 +176,10 @@ local function onA(f, sender, key)
 
     local m = ns.Roster.Get(key) or {}
     local responded = repeatPing and current and current.id == id and current.responded
+    local respondedAt = responded and current.respondedAt
     current = { id = id, key = key, name = m.name or sender, address = m.address or ns.address(sender),
         classFile = m.classFile, map = map, x = x, y = y, at = ns.now(), layer = tonumber(f[7]) or 0,
-        responded = responded }
+        responded = responded, respondedAt = respondedAt }
     local mine = ns.Layer and ns.Layer.Mine(map) or 0
     current.otherLayer = current.layer ~= 0 and mine ~= 0 and current.layer ~= mine
 
@@ -188,7 +190,7 @@ local function onA(f, sender, key)
     if ns.db.sound then PlaySound(SOUND, "Master") end
     ns.print(("|cffffd100%s needs help|r in %s (%d yd %s)%s."):format(current.name, mapName(map),
         current.dist, SHORT[current.dir] or "", current.otherLayer and ", other layer" or ""))
-    Alert.ShowBanner()
+    if not responded then Alert.ShowBanner() end -- (a ping again after I answered: pip only)
 end
 
 local function onE(f, sender, key)
@@ -204,6 +206,7 @@ function Alert.Respond()
     ns.Comm.Send({ "R", ns.Comm.PROTO, current.id, map or 0, ("%.4f"):format(x or 0), ("%.4f"):format(y or 0) },
         "WHISPER", current.address)
     current.responded = true
+    current.respondedAt = current.respondedAt or ns.now()
     if ns.db.autoAccept then acceptFrom, acceptUntil = current.key, ns.now() + LIFETIME end
     ns.print(("you answered %s's call."):format(current.name))
     Alert.ShowBanner()
@@ -259,6 +262,7 @@ local function buildBanner()
         local c = Alert.Current()
         if not c then self:Hide() return end
         local left = BANNER_TIME - (ns.now() - c.at)
+        if c.respondedAt then left = math.min(left, AFTER_RESPOND - (ns.now() - c.respondedAt)) end
         if left <= 0 then self:Hide() return end
         self:SetAlpha(left < 2 and left / 2 or 1)
         local sub = ("%s - %d yards %s"):format(mapName(c.map), c.dist or 0, c.dir or "")
