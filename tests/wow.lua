@@ -51,6 +51,11 @@ function Widget:GetCenter() return self._cx or 500, self._cy or 400 end
 -- (500 + x, 400 + y) so hover tests can aim the cursor at it.
 function Widget:SetPoint(p, a, b, c, d)
     self._point = { p, a, b, c, d }
+    -- A BOTTOMRIGHT point to the same frame as TOPLEFT: take its size (layout).
+    if p == "BOTTOMRIGHT" and type(a) == "table" and a.GetWidth then
+        self._w, self._h = a:GetWidth(), a:GetHeight()
+        if self._scripts.OnSizeChanged then self._scripts.OnSizeChanged(self, self._w, self._h) end
+    end
     if p == "CENTER" and type(c) == "number" then self._cx, self._cy = 500 + c, 400 + d end
 end
 function Widget:ClearAllPoints() self._point = nil end
@@ -83,6 +88,8 @@ GameTooltip.lines = {}
 function GameTooltip:AddLine(t) table.insert(self.lines, t) end
 function GameTooltip:SetOwner(o) self.lines = {}; self._owner = o end
 function GameTooltip:GetOwner() return self._owner end
+function GameTooltip:NumLines() return #self.lines end
+function GameTooltip:ClearLines() self.lines = {} end
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) table.insert(W.prints, m) end }
 UISpecialFrames = {}
 SlashCmdList = {}

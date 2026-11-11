@@ -139,6 +139,15 @@ function Position.Get(key) return guildies[key] end
 ---------------------------------------------------------------------------
 local grouped = {}
 
+-- "first surname" key of the player behind a unit token, or nil.
+local function unitKey(unit)
+    local first, last = ns.try(UnitName, unit)
+    if type(first) ~= "string" then return nil end
+    if type(last) == "string" and ns.readable(last) and last ~= "" then first = first .. " " .. last end
+    local key = ns.key(first)
+    if key and key ~= ns.meKey then return key end
+end
+
 local function rebuildGroup()
     local fresh = {}
     local n = ns.try(GetNumGroupMembers) or 0
@@ -146,18 +155,43 @@ local function rebuildGroup()
         local raid = ns.try(IsInRaid) == true
         local prefix = raid and "raid" or "party"
         for i = 1, raid and n or (n - 1) do
-            local first, last = ns.try(UnitName, prefix .. i)
-            if type(first) == "string" then
-                if type(last) == "string" and ns.readable(last) and last ~= "" then first = first .. " " .. last end
-                local key = ns.key(first)
-                if key and key ~= ns.meKey then fresh[key] = true end
-            end
+            local key = unitKey(prefix .. i)
+            if key then fresh[key] = true end
         end
     end
     grouped = fresh
 end
 
 function Position.InMyGroup(key) return grouped[key] == true end
+
+---------------------------------------------------------------------------
+-- Seen in the world. If I can see a guildie (their nameplate, my target or
+-- mouseover), we are on the same layer whatever the NPC detectors say right
+-- now: their dot is drawn as "same" instead of "unknown".
+---------------------------------------------------------------------------
+local SEEN_FOR = 30            -- seconds a sighting counts
+local seenAt = {}              -- key -> time I last saw them
+
+local function noteSeen(unit)
+    if ns.try(UnitIsPlayer, unit) ~= true then return end
+    local key = unitKey(unit)
+    if key and ns.Roster.Get(key) then seenAt[key] = ns.now() end
+end
+
+local function scanPlayerPlates()
+    if not (C_NamePlate and C_NamePlate.GetNamePlates) then return end
+    local plates = ns.try(C_NamePlate.GetNamePlates)
+    if type(plates) ~= "table" then return end
+    for _, plate in ipairs(plates) do
+        local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+        if u then noteSeen(u) end
+    end
+end
+
+function Position.SeenRecently(key)
+    local at = seenAt[key]
+    return at ~= nil and ns.now() - at <= SEEN_FOR
+end
 
 function Position.CountInMyZone()
     if not me.map then return nil end
@@ -206,6 +240,7 @@ end
 -- "na" (other zone, or no layer detector yet: drawn solid).
 function Position.Relation(g)
     if not ns.Layer or g.map ~= me.map then return "na" end
+    if Position.SeenRecently(g.key) then return "same" end -- seeing them proves it
     local mine = myLayer(me.map)
     if not g.layer or g.layer == 0 or mine == 0 then return "unknown" end
     return g.layer == mine and "same" or "other"
@@ -215,9 +250,32 @@ end
 function Position.AddTooltip(tt, g)
     local m = ns.Roster.Get(g.key) or {}
     local r, gg, b = ns.classColor(m.classFile)
-    tt:AddLine(m.name or g.key, r, gg, b)
+    -- totalRP3 profile (RP.lua; each part only when its setting is on and the
+    -- profile has it): custom colour, name, race, and class with the real one
+    -- after it in brackets. Same lines otherwise.
+    local rpName, rpRace, rpClass, rpHex
+    if ns.RP then
+        local cr, cg, cb = ns.RP.Color(g.key)
+        if cr then
+            r, gg, b = cr, cg, cb
+            rpHex = ("%02x%02x%02x"):format(math.floor(cr * 255 + 0.5), math.floor(cg * 255 + 0.5), math.floor(cb * 255 + 0.5))
+        end
+        rpName, rpRace, rpClass = ns.RP.Identity(g.key)
+    end
+    -- The class shown (custom or real) in the custom colour too, as TRP does;
+    -- the real class in brackets after a custom one is in its class colour.
+    local shownClass = rpClass or m.class
+    if shownClass and rpHex then shownClass = ("|cff%s%s|r"):format(rpHex, shownClass) end
+    local class = shownClass
+    if rpClass and m.class then
+        local kr, kg, kb = ns.classColor(m.classFile)
+        local realClass = ("|cff%02x%02x%02x%s|r"):format(math.floor(kr * 255 + 0.5),
+            math.floor(kg * 255 + 0.5), math.floor(kb * 255 + 0.5), m.class)
+        class = ("%s (%s)"):format(shownClass, realClass)
+    end
+    tt:AddLine(rpName or m.name or g.key, r, gg, b)
     local level = g.level or m.level
-    local desc = ("Level %s %s %s"):format(level or "?", m.race or "", m.class or "")
+    local desc = ("Level %s %s %s"):format(level or "?", rpRace or m.race or "", class or "")
     tt:AddLine((desc:gsub("%s+", " ")), 1, 1, 1)
     if m.rank then
         local guild = ns.try(GetGuildInfo, "player")
@@ -241,6 +299,10 @@ ns.onLogin(function()
     ns:On("GROUP_ROSTER_UPDATE", rebuildGroup)
     -- Names can read as unknown for a moment after someone joins; recheck.
     ns.every(2, rebuildGroup, "group members")
+    ns:On("NAME_PLATE_UNIT_ADDED", function(unit) noteSeen(unit) end)
+    ns:On("UPDATE_MOUSEOVER_UNIT", function() noteSeen("mouseover") end)
+    ns:On("PLAYER_TARGET_CHANGED", function() noteSeen("target") end)
+    ns.every(5, scanPlayerPlates, "player plates")
     ns.every(1, function() Position.Tick() end, "position")
     ns:On("ZONE_CHANGED_NEW_AREA", function() ns.after(1, function() Position.Tick(true) end, "position zone") end)
     -- Loading screen or logout: drop my dot now; PLAYER_ENTERING_WORLD brings it back.

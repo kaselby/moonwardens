@@ -251,6 +251,9 @@ UI.SETTINGS = {
     { "worldDots", "Show guildies on the world map" },
     { "otherLayers", "Show guildies on other layers (faded)" },
     { "minimapDots", "Show guildies on the minimap" },
+    -- totalRP3 profiles (RP.lua). Without totalRP3 these change nothing.
+    { "rpColors", "Show guildies custom Roleplay colors" },
+    { "rpNames", "Show guildies custom Roleplay names/class names" },
     -- Research section ("Help collect layer data") comes back with the data log (0.6).
 }
 

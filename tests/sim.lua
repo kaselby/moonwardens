@@ -177,6 +177,7 @@ check(panel.cards[1].name:GetText() == "Layer 1" and panel.cards[2].name:GetText
     and panel.cards[2].name:GetText():find("you", 1, true) and panel.cards[2].count:GetText() == "2 guildies", "layer cards")
 
 -- Hover
+GameTooltip:Hide() -- (nobody else's tooltip up: ours steps back for those)
 W.cursor = { tdot._cx + 3, tdot._cy - 2 }
 W.advance(0.1)
 local tip = table.concat(GameTooltip.lines, "\n")
@@ -303,9 +304,16 @@ check(Lr.Mine(1440) == 0, "forgotten on zone change")
 W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
 W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
 check(Lr.Mine(1440) == 7075, "re-confirmed")
+-- Shard transfer: the layer is kept, and the next NPC settles it.
 W.fire("SHARD_TRANSFER")
-check(Lr.Mine(1440) == 0, "forgotten on shard transfer")
+check(Lr.Mine(1440) == 7075, "kept through shard transfer (rechecking)")
+W.units.target = { guid = npc(7062, "B1") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7062, "one NPC replaces it after a shard transfer")
+W.fire("SHARD_TRANSFER")
 W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075, "and back again")
+W.units.target = { guid = npc(7062, "B2") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075, "outside a recheck one NPC still doesn't switch")
 W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
 W.advance(601)
 check(Lr.Mine(1440) == 0, "forgotten after 10 min")

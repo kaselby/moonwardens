@@ -18,6 +18,12 @@ local state = {}               -- { map, layer, at, n }
 local cand = {}                -- { layer, guids = {}, n }
 local mapAt, mapNow = -10, nil
 local stats = { seen = 0, used = 0, pets = 0 }
+-- Recheck mode: after a loading screen, shard transfer or group change we
+-- may (or may not) have been moved. The layer is kept rather than wiped (a
+-- wipe shows every guildie as "unknown" until two new NPCs turn up), and the
+-- first NPC seen decides: same number confirms it, a different one replaces it.
+local recheck = false
+local lastEvent                -- { why, at, kind = "reset" | "recheck" } for /mw layer
 
 local function currentMap()
     local t = ns.now()
@@ -32,8 +38,23 @@ end
 local function reset(why)
     local had = state.layer
     state, cand = {}, {}
+    recheck = false
     mapAt = -10
+    lastEvent = { why = why, at = ns.now(), kind = "reset" }
     if had then ns.fire("LAYER", nil, had, nil, why) end
+end
+
+-- Keep the layer, but let the next NPC sighting settle it. Nameplates are
+-- rescanned shortly after, since NAME_PLATE_UNIT_ADDED won't fire again for
+-- plates that were already up.
+local function softReset(why)
+    mapAt = -10
+    cand = {}
+    if state.layer then recheck = true end
+    lastEvent = { why = why, at = ns.now(), kind = state.layer and "recheck" or "reset" }
+    for _, delay in ipairs({ 0.5, 2, 5 }) do
+        ns.after(delay, function() if Layer.ScanPlates then Layer.ScanPlates() end end, "layer rescan")
+    end
 end
 
 local function fresh()
@@ -66,6 +87,7 @@ function Layer.Observe(guid, src)
     if server == state.layer then
         state.at, state.n = ns.now(), state.n + 1
         cand = {}
+        recheck = false
         return true
     end
     if cand.layer ~= server then cand = { layer = server, guids = {}, n = 0 } end
@@ -73,10 +95,11 @@ function Layer.Observe(guid, src)
         cand.guids[guid] = true
         cand.n = cand.n + 1
     end
-    if cand.n >= NEED then
+    if cand.n >= (recheck and 1 or NEED) then
         local from = state.layer
         state = { map = map, layer = server, at = ns.now(), n = cand.n }
         cand = {}
+        recheck = false
         ns.fire("LAYER", map, from, server, src)
     end
     return true
@@ -121,8 +144,12 @@ ns.onLogin(function()
     ns:On("PLAYER_SOFT_FRIEND_CHANGED", function() observeUnit("softfriend", "soft") end)
     ns:On("PLAYER_SOFT_INTERACT_CHANGED", function() observeUnit("softinteract", "soft") end)
     ns:On("ZONE_CHANGED_NEW_AREA", function() reset("zone") end)
-    ns:On("PLAYER_ENTERING_WORLD", function() reset("loading") end)
-    ns:On("SHARD_TRANSFER", function() reset("shard transfer") end)
+    -- These may or may not move us to another layer; recheck instead of wiping.
+    -- (A move to another zone is still caught: Mine() and Observe() are per map.)
+    ns:On("PLAYER_ENTERING_WORLD", function() softReset("loading screen") end)
+    ns:On("SHARD_TRANSFER", function() softReset("shard transfer") end)
+    ns:On("GROUP_LEFT", function() softReset("left group") end)
+    ns:On("GROUP_JOINED", function() softReset("joined group") end)
     ns.every(2, Layer.ScanPlates, "nameplate scan")
 end, "layer")
 
@@ -135,6 +162,10 @@ ns.slash.layer = { help = "your layer in this zone and how it was found", fn = f
         ns.print(("you are on %s here (server number %d), confirmed by %d sightings, last %d s ago."):format(
             ns.Position.LayerLabel(map, mine) or "a layer", mine, state.n, ns.now() - state.at))
     end
+    if recheck then ns.print("  rechecking: the next NPC seen will confirm or replace it.") end
     if cand.layer then ns.print(("  a different number (%d) was seen %d time(s); two NPCs are needed to switch."):format(cand.layer, cand.n)) end
+    if lastEvent then
+        ns.print(("  last %s: %s, %d s ago."):format(lastEvent.kind, lastEvent.why, ns.now() - lastEvent.at))
+    end
     ns.print(("  GUIDs read %d, used %d, player-controlled skipped %d. Layers are experimental."):format(stats.seen, stats.used, stats.pets))
 end }

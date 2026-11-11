@@ -19,7 +19,90 @@ local holder, driver, pip
 local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
-local tipKey
+local tipKey                -- hovered guildies in the tooltip we own, or nil
+
+---------------------------------------------------------------------------
+-- Hover: guildies join the minimap's own tooltip, the way party members do.
+-- The game builds that tooltip (GameTooltip:SetMinimapMouseover: flight
+-- masters, nodes, party members...) every frame while something is under
+-- the cursor. A post-call adds our guildie lines to it each time, so it is one
+-- tooltip with everything in it. Only when the game has nothing to show do we
+-- show GameTooltip ourselves, with the same lines; once it has, we step back.
+---------------------------------------------------------------------------
+
+-- Is the mouse on the minimap itself (not on a frame on top of it, such as
+-- an open world map)? Our dots take no mouse, so the minimap keeps the focus.
+local function overMinimap()
+    if Minimap.IsMouseMotionFocus then
+        local ok, yes = pcall(Minimap.IsMouseMotionFocus, Minimap)
+        if ok then return yes and true or false end
+    end
+    if GetMouseFocus then
+        local ok, f = pcall(GetMouseFocus)
+        if ok then return f == Minimap end
+    end
+    return holder:IsMouseOver()
+end
+
+-- Guildies whose dots are under the cursor, sorted by name (a stable order).
+local function hovered()
+    if used == 0 or not holder or not overMinimap() then return {} end
+    return ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
+end
+
+-- Each guildie as in 0.5.1, the name a notch bigger under the game's lines
+-- (shared with the world map: ns.AddGuildieLines in MapWorld.lua).
+local function addLines(tt, hits) ns.AddGuildieLines(tt, hits) end
+
+-- The game's minimap tooltip is being built: add our guildies to it.
+local function onMinimapTooltip(tt)
+    if tt ~= GameTooltip then return end
+    local hits = hovered()
+    if #hits > 0 then addLines(tt, hits) end
+end
+
+-- Does the game have minimap lines of its own under the cursor right now?
+local function gameHasLines()
+    local get = C_TooltipInfo and C_TooltipInfo.GetMinimapMouseover
+    if not get then return false end
+    local ok, data = pcall(get)
+    if not ok or type(data) ~= "table" or not ns.readable(data) then return false end
+    local lines = data.lines
+    return type(lines) == "table" and ns.readable(lines) and #lines > 0
+end
+
+-- Every hover tick: own GameTooltip only while the game isn't using it.
+local function updateHover()
+    local shown, owner = GameTooltip:IsShown(), GameTooltip:GetOwner()
+    if shown and owner ~= holder then
+        tipKey = nil                -- the game's tooltip (or another's): ours ride along in it
+        return
+    end
+    local hits = hovered()
+    if #hits == 0 then
+        if tipKey and owner == holder then GameTooltip:Hide() end
+        tipKey = nil
+        return
+    end
+    -- Something of the game's is under the cursor too (a flight master, a
+    -- node): build its tooltip the way the game does, and our post-call adds
+    -- the guildies under its lines. Rebuilt each tick, as the game does.
+    if GameTooltip.SetMinimapMouseover and gameHasLines() then
+        GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
+        local ok = pcall(GameTooltip.SetMinimapMouseover, GameTooltip)
+        if ok then
+            GameTooltip:Show()
+            tipKey = "game"
+            return
+        end
+    end
+    local setKey = ns.HitsKey(hits)
+    if setKey == tipKey and shown and owner == holder then return end
+    GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
+    addLines(GameTooltip, hits)
+    GameTooltip:Show()
+    tipKey = setKey
+end
 
 function MapMini.ZoneSize(map)
     local s = sizes[map]
@@ -145,10 +228,9 @@ local function onUpdate(_, elapsed)
         MapMini.Update()
     end
     hoverAcc = hoverAcc + elapsed
-    if hoverAcc >= 0.1 then
+    if hoverAcc >= 0.05 then
         hoverAcc = 0
-        local hits = (used > 0 and holder:IsMouseOver()) and ns.DotsUnderCursor(dots, used, HOVER_RADIUS) or {}
-        tipKey = ns.ShowDotTooltip(holder, hits, tipKey)
+        updateHover()
     end
 end
 
@@ -162,6 +244,14 @@ ns.onLogin(function()
     pip:Hide()
     driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", ns.guard(onUpdate, "minimap"))
+    -- Bumped name lines go back to normal size before anything else reuses them.
+    ns.WatchTooltip(GameTooltip)
+    -- Our lines in the game's own minimap tooltip (see updateHover). Guarded:
+    -- an error here must never break the game's tooltip.
+    local kind = Enum and Enum.TooltipDataType and Enum.TooltipDataType.MinimapMouseover
+    if kind and TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+        TooltipDataProcessor.AddTooltipPostCall(kind, ns.guard(onMinimapTooltip, "minimap tooltip"))
+    end
 end, "minimap")
 
 -- For tests.
