@@ -114,7 +114,7 @@ function ns.StyleDot(d, g, rel)
         d.cr, d.cg, d.cb = r, gg, b
     end
     if d.rel ~= rel then
-        d:SetAlpha(rel == "other" and 0.4 or 1)
+        d:SetAlpha(rel == "other" and 0.35 or 0.8) -- (a touch faint: the game's group dots stand out)
         d.hole:SetShown(rel == "unknown")
         d.rel = rel
     end

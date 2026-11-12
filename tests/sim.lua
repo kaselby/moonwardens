@@ -171,7 +171,7 @@ local tdot
 for i = 1, used do if dots[i].g.key == "thalanor oakheart" then tdot = dots[i] end end
 check(tdot and tdot._point[2] == root and tdot._point[3] == "TOPLEFT"
     and math.abs(tdot._point[4] - 400) < 1e-6 and math.abs(tdot._point[5] + 0.6 * 667) < 1e-6, "dot placed on the canvas")
-check(tdot.rel == "same" and tdot:GetAlpha() ~= 0.4, "same layer dot solid")
+check(tdot.rel == "same" and tdot:GetAlpha() == 0.8, "same layer dot: slightly faint (0.8)")
 check(panel and panel:IsShown() and panel.head:GetText() == "Layers in Ashenvale", "side panel heading")
 check(panel.cards[1].name:GetText() == "Layer 1" and panel.cards[2].name:GetText():find("Layer 2", 1, true)
     and panel.cards[2].name:GetText():find("you", 1, true) and panel.cards[2].count:GetText() == "2 guildies", "layer cards")
