@@ -244,7 +244,6 @@ function MapMini.Update()
     local ppy = half / MapMini.ViewRadius()
     local facing = rotating() and ns.try(GetPlayerFacing) or nil
     if facing and type(facing) ~= "number" then facing = nil end
-    updateHalos(map, px, py, w, h, ppy, facing, half)
     local limit = half - DOT_SIZE / 2 - 1
     local n = 0
     for _, g in pairs(ns.Position.All()) do

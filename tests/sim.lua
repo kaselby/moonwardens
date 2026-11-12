@@ -260,9 +260,9 @@ check(not hasT, "world map: grouped guildie not drawn twice")
 W.unitPos = { party1 = { 0.5 + 30 / 5767, 0.5 } }
 W.advance(0.3)
 local _, _, _, mh = ns.MapMini.Debug()
-check(mh[1] and mh[1]:IsShown() and math.abs(mh[1]._point[4] - 30 * ppy) < 0.3, "minimap: ring on the party member")
+check(not (mh[1] and mh[1]:IsShown()), "minimap: no ring on the party member (off since 0.5.4)")
 local wh = ns.MapWorld.Halos()
-check(wh[1] and wh[1]:IsShown() and math.abs(wh[1]._point[4] - (0.5 + 30 / 5767) * 1000) < 1e-6, "world map: ring on the party member")
+check(not (wh[1] and wh[1]:IsShown()), "world map: no ring on the party member (off since 0.5.4)")
 check(gd[1] and gd[1].fill:GetTexture():find("diamond", 1, true), "guildie dots are diamonds")
 W.group = {}
 W.fire("GROUP_ROSTER_UPDATE")
@@ -271,7 +271,6 @@ gd, gused = ns.MapWorld.Debug()
 hasT = false
 for i = 1, gused do if gd[i].g.key == "thalanor oakheart" then hasT = true end end
 check(hasT and select(2, ns.MapMini.Debug()) == 1, "dots come back after leaving the group")
-check(not mh[1]:IsShown() and not wh[1]:IsShown(), "rings gone after leaving the group")
 W.unitPos = nil
 WorldMapFrame:Hide(); W.advance(0.1)
 SlashCmdList.MOONWARDENS("test")

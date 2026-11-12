@@ -20,8 +20,9 @@ local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
 local DIAMOND = "Interface\\AddOns\\Moonwardens\\media\\diamond"
 local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
 -- Guildies are diamonds, so they can't be mistaken for the game's round
--- party/raid dots; group members get a gold ring around the game's dot
--- (ns.NewHalo) to stand out further.
+-- party/raid dots. (0.5.3 also ringed group members' dots; the rings lagged
+-- the game's dots and looked clunky, so 0.5.4 turned them off. NewHalo and
+-- GroupPositions stay for now, unused.)
 ns.DOT_DIAMOND = 11
 local DOT_SIZE = ns.DOT_DIAMOND
 local HALO_SIZE = 20
@@ -699,7 +700,6 @@ local function onUpdate(_, elapsed)
     hoverAcc = hoverAcc + elapsed
     if hoverAcc >= 0.05 then
         hoverAcc = 0
-        updateHalos()
         MapWorld.Hover()
     end
 end
