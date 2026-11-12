@@ -7,7 +7,7 @@ local _, ns = ...
 local MapMini = {}
 ns.MapMini = MapMini
 
-local DOT_SIZE = 9
+local DOT_SIZE = ns.DOT_DIAMOND or 11   -- (MapWorld.lua loads first)
 local TICK = 0.05
 local HOVER_RADIUS = 6
 
@@ -16,6 +16,7 @@ local OUTDOOR = { [0] = 466.67, 400, 333.33, 266.67, 200, 133.33 }
 local INDOOR = { [0] = 300, 240, 180, 120, 80, 50 }
 
 local holder, driver, pip
+local halos = {}            -- gold rings around group members' game dots
 local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
@@ -161,6 +162,33 @@ local function hideFrom(n)
     used = n
 end
 
+local function hideHalos(from)
+    for i = (from or 0) + 1, #halos do halos[i]:Hide() end
+end
+
+-- A ring around each group member's own minimap dot (positions from the
+-- game, as its dots are). Out of minimap range (the game shows an edge
+-- arrow then): no ring.
+local function updateHalos(map, px, py, w, h, ppy, facing, half)
+    local n = 0
+    local limit = half - 4
+    for _, p in ipairs(ns.GroupPositions(map)) do
+        local dx, dy = MapMini.Offset(p.x, p.y, px, py, w, h, ppy, facing)
+        if dx * dx + dy * dy <= limit * limit then
+            n = n + 1
+            local r = halos[n]
+            if not r then
+                r = ns.NewHalo(holder, 18)
+                r:SetFrameLevel(holder:GetFrameLevel() + 1)
+                halos[n] = r
+            end
+            r:SetPoint("CENTER", holder, "CENTER", dx, dy)
+            r:Show()
+        end
+    end
+    hideHalos(n)
+end
+
 local function inInstance()
     local inside, kind = ns.try(IsInInstance)
     return inside == true and kind ~= "none"
@@ -194,7 +222,7 @@ local function updatePip(map, px, py, w, h, ppy, facing, half)
 end
 
 function MapMini.Update()
-    if inInstance() then hideFrom(0); pip:Hide(); return end
+    if inInstance() then hideFrom(0); hideHalos(); pip:Hide(); return end
     local map, px, py = ns.Position.ReadMine()
     if map and px then
         local w, h = MapMini.ZoneSize(map)
@@ -207,15 +235,16 @@ function MapMini.Update()
     else
         pip:Hide()
     end
-    if not ns.db.minimapDots then hideFrom(0); return end
+    if not ns.db.minimapDots then hideFrom(0); hideHalos(); return end
     local map, px, py = ns.Position.ReadMine()
-    if not (map and px and py) then hideFrom(0); return end
+    if not (map and px and py) then hideFrom(0); hideHalos(); return end
     local w, h = MapMini.ZoneSize(map)
-    if not w then hideFrom(0); return end
+    if not w then hideFrom(0); hideHalos(); return end
     local half = Minimap:GetWidth() / 2
     local ppy = half / MapMini.ViewRadius()
     local facing = rotating() and ns.try(GetPlayerFacing) or nil
     if facing and type(facing) ~= "number" then facing = nil end
+    updateHalos(map, px, py, w, h, ppy, facing, half)
     local limit = half - DOT_SIZE / 2 - 1
     local n = 0
     for _, g in pairs(ns.Position.All()) do
@@ -226,7 +255,7 @@ function MapMini.Update()
                 if dx * dx + dy * dy <= limit * limit then
                     n = n + 1
                     local d = dots[n]
-                    if not d then d = ns.NewDot(holder, DOT_SIZE); dots[n] = d end
+                    if not d then d = ns.NewDot(holder, DOT_SIZE, "diamond"); dots[n] = d end
                     d.g = g
                     ns.StyleDot(d, g, rel)
                     d:SetPoint("CENTER", holder, "CENTER", math.floor(dx * 2 + 0.5) / 2, math.floor(dy * 2 + 0.5) / 2)
@@ -278,4 +307,4 @@ ns.onLogin(function()
 end, "minimap")
 
 -- For tests.
-function MapMini.Debug() return dots, used, pip end
+function MapMini.Debug() return dots, used, pip, halos end

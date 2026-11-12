@@ -33,6 +33,8 @@ function Widget:IsShown() return self._shown ~= false end
 function Widget:IsVisible() return self._shown ~= false end
 function Widget:SetShown(v) if v then self:Show() else self:Hide() end end
 function Widget:SetText(t) self._text = t end
+function Widget:SetTexture(t) self._tex = t end
+function Widget:GetTexture() return self._tex end
 function Widget:GetText() return self._text end
 function Widget:SetChecked(v) self._checked = v end
 function Widget:GetChecked() return self._checked end
@@ -158,6 +160,7 @@ end
 W.me = { first = "Sanalune", last = "Silverwind" }
 function UnitName(u) if u == "player" then return W.me.first, W.me.last end return W.unitNames and W.unitNames[u] end
 function IsInGuild() return true end
+function UnitIsUnit(a, b) return a == b end
 W.roster = {
     { "Sanalune Silverwind", "Warden-General", 0, 60, "Druid", "Ashenvale", true, "DRUID", "Player-1-01" },
     { "Thalanor Oakheart", "Sentinel", 3, 60, "Warrior", "Ashenvale", true, "WARRIOR", "Player-1-02" },
@@ -198,7 +201,12 @@ function CreateVector2D(x, y)
 end
 C_Map = {
     GetBestMapForUnit = function() return W.map end,
-    GetPlayerMapPosition = function(map) if not W.pos then return nil end return CreateVector2D(W.pos[1], W.pos[2]) end,
+    GetPlayerMapPosition = function(map, unit)
+        if unit and unit ~= "player" then   -- group members: W.unitPos[unit] = { x, y }
+            local p = W.unitPos and W.unitPos[unit]
+            return p and CreateVector2D(p[1], p[2]) or nil
+        end
+        if not W.pos then return nil end return CreateVector2D(W.pos[1], W.pos[2]) end,
     GetMapInfo = function(map) return W.maps[map] and { name = W.maps[map].name } end,
     GetWorldPosFromMapPos = function(map, v)
         local m = W.maps[map]

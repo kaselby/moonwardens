@@ -17,7 +17,14 @@ local MapWorld = {}
 ns.MapWorld = MapWorld
 
 local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
-local DOT_SIZE = 9
+local DIAMOND = "Interface\\AddOns\\Moonwardens\\media\\diamond"
+local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
+-- Guildies are diamonds, so they can't be mistaken for the game's round
+-- party/raid dots; group members get a gold ring around the game's dot
+-- (ns.NewHalo) to stand out further.
+ns.DOT_DIAMOND = 11
+local DOT_SIZE = ns.DOT_DIAMOND
+local HALO_SIZE = 20
 local HOVER_RADIUS = 7
 local PANEL_WIDTH = 196
 
@@ -34,24 +41,63 @@ function ns.NewFrame(kind, parent, template)
     return f
 end
 
--- A dot: dark outline, class-coloured disc, and a dark centre that makes it
--- a ring when the layer is unknown. The circle mask texture drawn as a
--- texture is a plain white disc, so no mask objects are needed.
-function ns.NewDot(parent, size)
+-- A dot: dark outline, class-coloured shape, and a dark centre that makes it
+-- hollow when the layer is unknown. `shape` "diamond" (guildies) or nil for
+-- a disc (the alert pip). Both textures are plain white shapes, tinted.
+function ns.NewDot(parent, size, shape)
     local d = ns.NewFrame("Frame", parent)
     d:SetSize(size, size)
     d.size = size
+    local tex = shape == "diamond" and DIAMOND or CIRCLE
     local function disc(layer, sub, inset)
         local t = d:CreateTexture(nil, layer, nil, sub)
-        t:SetTexture(CIRCLE)
+        t:SetTexture(tex)
         t:SetPoint("TOPLEFT", inset, -inset)
         t:SetPoint("BOTTOMRIGHT", -inset, inset)
         return t
     end
     d.outline = disc("ARTWORK", 1, 0); d.outline:SetVertexColor(0, 0, 0, 0.9)
-    d.fill = disc("ARTWORK", 2, 1.5)
+    d.fill = disc("ARTWORK", 2, shape == "diamond" and 2 or 1.5)   -- (a diamond's edge is thinner at the same inset)
     d.hole = disc("ARTWORK", 3, math.floor(size * 0.32)); d.hole:SetVertexColor(0.05, 0.05, 0.05, 0.9)
     return d
+end
+
+-- A gold ring drawn around a group member's own (game) dot.
+function ns.NewHalo(parent, size)
+    local h = ns.NewFrame("Frame", parent)
+    h:SetSize(size or HALO_SIZE, size or HALO_SIZE)
+    h.outline = h:CreateTexture(nil, "ARTWORK", nil, 1)
+    h.outline:SetTexture(RING); h.outline:SetAllPoints(); h.outline:SetVertexColor(0, 0, 0, 0.8)
+    h.ring = h:CreateTexture(nil, "ARTWORK", nil, 2)
+    h.ring:SetTexture(RING)
+    h.ring:SetPoint("TOPLEFT", 1, -1); h.ring:SetPoint("BOTTOMRIGHT", -1, 1)
+    h.ring:SetVertexColor(1, 0.82, 0.2, 1)
+    return h
+end
+
+-- Group members' positions on `map` (map fractions), from the game itself
+-- (the same source as its own dots, so the rings sit on them). Unreadable
+-- (an instance, a restricted client): none.
+function ns.GroupPositions(map)
+    local out = {}
+    if not (map and C_Map and C_Map.GetPlayerMapPosition) then return out end
+    local n = ns.try(GetNumGroupMembers) or 0
+    if n == 0 then return out end
+    local raid = ns.try(IsInRaid) == true
+    for i = 1, raid and n or (n - 1) do
+        local u = (raid and "raid" or "party") .. i
+        if ns.try(UnitIsUnit, u, "player") ~= true then
+            local pos = ns.try(C_Map.GetPlayerMapPosition, map, u)
+            if type(pos) == "table" and ns.readable(pos) then
+                local ok, x, y = pcall(pos.GetXY, pos)
+                if ok and type(x) == "number" and type(y) == "number" and ns.readable(x) and ns.readable(y)
+                        and (x ~= 0 or y ~= 0) then
+                    out[#out + 1] = { unit = u, x = x, y = y }
+                end
+            end
+        end
+    end
+    return out
 end
 
 -- rel: "same"/"na" solid, "other" faded, "unknown" ring.
@@ -418,7 +464,7 @@ local function buildPanel()
     panel.legend = {}
     local LEGEND = { { "your layer", "same" }, { "other layer", "other" }, { "layer unknown", "unknown" } }
     for i, e in ipairs(LEGEND) do
-        local d = ns.NewDot(panel, 10)
+        local d = ns.NewDot(panel, ns.DOT_DIAMOND, "diamond")
         ns.StyleDot(d, { key = "" }, e[2])
         d.fill:SetVertexColor(0.67, 0.83, 0.45, 1)
         local t = UI.Text(panel, "small", nil, "LEFT")
@@ -551,7 +597,7 @@ function MapWorld.Refresh()
                 if ns.db.worldDots and L.w and (rel ~= "other" or ns.db.otherLayers)
                         and not ns.Position.InMyGroup(g.key) then -- the game draws group members itself
                     local d = dotOf[g.key]
-                    if not d then d = ns.NewDot(root, DOT_SIZE); dotOf[g.key] = d end
+                    if not d then d = ns.NewDot(root, DOT_SIZE, "diamond"); dotOf[g.key] = d end
                     d.g = g
                     d.fx, d.fy = x, y     -- map fractions; placeDots turns them into offsets
                     ns.StyleDot(d, g, rel)
@@ -597,7 +643,29 @@ function MapWorld.Draws(key)
     return d ~= nil and d.g ~= nil and d:IsShown()
 end
 
+-- Gold rings around group members' own (game) dots, so the group stands
+-- out from the guild. Moved with the hover tick (20 a second), since the
+-- game moves its group dots smoothly.
+local halos = {}
+local function updateHalos()
+    local n = 0
+    if shownMap and L.w and ns.db.worldDots and not off() then
+        for _, p in ipairs(ns.GroupPositions(shownMap)) do
+            n = n + 1
+            local h = halos[n]
+            if not h then h = ns.NewHalo(root); halos[n] = h end
+            h:SetFrameLevel(root:GetFrameLevel() + 1)
+            h:ClearAllPoints()
+            h:SetPoint("CENTER", root, "TOPLEFT", p.x * L.w, -p.y * L.h)
+            h:Show()
+        end
+    end
+    for i = n + 1, #halos do halos[i]:Hide() end
+end
+MapWorld.Halos = function() return halos end   -- (tests)
+
 local function hideAll()
+    for _, h in ipairs(halos) do h:Hide() end
     for _, d in pairs(dotOf) do d:Hide(); d.g = nil end
     for i = 1, used do dots[i] = nil end
     used = 0
@@ -631,6 +699,7 @@ local function onUpdate(_, elapsed)
     hoverAcc = hoverAcc + elapsed
     if hoverAcc >= 0.05 then
         hoverAcc = 0
+        updateHalos()
         MapWorld.Hover()
     end
 end

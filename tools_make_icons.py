@@ -43,6 +43,20 @@ def glow():
     return im.resize((64, 64), Image.LANCZOS)
 
 os.makedirs(OUT, exist_ok=True)
+def diamond():
+    im = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+    ImageDraw.Draw(im).polygon([(S / 2, 4), (S - 4, S / 2), (S / 2, S - 4), (4, S / 2)], fill=(255, 255, 255, 255))
+    return im.resize((64, 64), Image.LANCZOS)
+
+def ring():
+    im = Image.new("RGBA", (S, S), (255, 255, 255, 0))
+    d = ImageDraw.Draw(im)
+    d.ellipse((8, 8, S - 8, S - 8), fill=(255, 255, 255, 255))
+    d.ellipse((92, 92, S - 92, S - 92), fill=(255, 255, 255, 0))
+    return im.resize((64, 64), Image.LANCZOS)
+
+diamond().save(os.path.join(OUT, "diamond.tga"), compression=None)   # guildie dots (tinted)
+ring().save(os.path.join(OUT, "ring.tga"), compression=None)         # group member rings (tinted)
 icon().save(os.path.join(OUT, "alert.tga"), compression=None)
 glow().save(os.path.join(OUT, "alert_glow.tga"), compression=None)
 icon().resize((256, 256), Image.NEAREST).save("/tmp/alert_preview.png")
