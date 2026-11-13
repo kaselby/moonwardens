@@ -32,19 +32,23 @@ local gameDrives = false    -- hooked the game's Minimap_OnUpdate (see below)
 -- show GameTooltip ourselves, with the same lines; once it has, we step back.
 ---------------------------------------------------------------------------
 
--- Is the mouse on the minimap itself (not on a frame on top of it, such as
--- an open world map)? Our dots take no mouse, so the minimap keeps the focus.
+-- Is the mouse over the minimap? By area, not by mouse focus: another
+-- addon's pin on the minimap may hold the focus (0.5.4 checked focus, and
+-- hovering showed nothing in game). An open world map on top doesn't count.
 local function overMinimap()
-    if Minimap.IsMouseMotionFocus then
-        local ok, yes = pcall(Minimap.IsMouseMotionFocus, Minimap)
-        if ok then return yes and true or false end
-    end
-    if GetMouseFocus then
-        local ok, f = pcall(GetMouseFocus)
-        if ok then return f == Minimap end
-    end
-    return holder:IsMouseOver()
+    if not holder:IsMouseOver() then return false end
+    if WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame:IsMouseOver() then return false end
+    return true
 end
+
+-- Is the game's own minimap hover running (its OnUpdate is set while the
+-- mouse is on the minimap and the minimap has the focus)?
+local function gameHovering()
+    local ok, fn = pcall(Minimap.GetScript, Minimap, "OnUpdate")
+    return ok and fn ~= nil
+end
+
+local dbg = { hook = 0, added = 0 }   -- counters for /mw hover
 
 -- Guildies whose dots are under the cursor, sorted by name (a stable order).
 local function hovered()
@@ -80,12 +84,14 @@ end
 -- guildie tooltip never showed in game). So we add our lines right after it,
 -- every frame, in a hook: one tooltip, the game's lines (if any) then ours.
 local function afterGameHover()
+    dbg.hook = dbg.hook + 1
     if used == 0 or not holder or not holder:IsVisible() then return end
     if GameTooltip:GetOwner() ~= UIParent then return end   -- (someone else's tooltip now)
     local hits = ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
     if #hits == 0 then return end
     addLines(GameTooltip, hits)
     GameTooltip:Show()
+    dbg.added = dbg.added + 1
 end
 
 -- Every hover tick (clients without Minimap_OnUpdate only): own GameTooltip
@@ -275,7 +281,10 @@ local function onUpdate(_, elapsed)
     hoverAcc = hoverAcc + elapsed
     if hoverAcc >= 0.05 then
         hoverAcc = 0
-        if not gameDrives then updateHover() end
+        -- The game's hover rebuilds the tooltip itself (our hook adds to it);
+        -- when it isn't running (no hook, or the focus is on something else
+        -- over the minimap), we show the tooltip ourselves.
+        if not (gameDrives and gameHovering()) then updateHover() end
     end
 end
 
@@ -304,6 +313,35 @@ ns.onLogin(function()
         TooltipDataProcessor.AddTooltipPostCall(kind, ns.guard(onMinimapTooltip, "minimap tooltip"))
     end
 end, "minimap")
+
+-- /mw hover: for 15 s, once a second, what the minimap hover sees.
+ns.slash.hover = { help = "debug: hover a guildie on the minimap for 15 s", fn = function()
+    ns.print("hover debug: put the mouse on a guildie's dot on the minimap.")
+    for t = 1, 15 do
+        ns.after(t, function()
+            local cx, cy = GetCursorPosition()
+            local best
+            for i = 1, used do
+                local x, y = dots[i]:GetCenter()
+                local sc = dots[i]:GetEffectiveScale()
+                if x and sc then
+                    local d = math.sqrt((cx / sc - x) ^ 2 + (cy / sc - y) ^ 2)
+                    if not best or d < best then best = d end
+                end
+            end
+            local foci = GetMouseFoci and ns.try(GetMouseFoci)
+            local focus = type(foci) == "table" and foci[1] or (GetMouseFocus and ns.try(GetMouseFocus))
+            local fname = focus and (ns.try(focus.GetDebugName, focus) or ns.try(focus.GetName, focus)) or "none"
+            local owner = GameTooltip:GetOwner()
+            local oname = owner and (ns.try(owner.GetDebugName, owner) or ns.try(owner.GetName, owner)) or "none"
+            ns.print(("%d: hooked %s, game hover %s, over %s, focus %s, dots %d, nearest %s px (r %d), tip %s/%s, hook calls %d, added %d"):format(
+                t, tostring(gameDrives), tostring(gameHovering()), tostring(overMinimap()), tostring(fname), used,
+                best and ("%.1f"):format(best) or "-", HOVER_RADIUS, GameTooltip:IsShown() and "shown" or "hidden",
+                tostring(oname), dbg.hook, dbg.added))
+            dbg.hook, dbg.added = 0, 0
+        end, "hover debug")
+    end
+end }
 
 -- For tests.
 function MapMini.Debug() return dots, used, pip, halos end
