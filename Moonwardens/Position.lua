@@ -246,6 +246,20 @@ function Position.Relation(g)
     return g.layer == mine and "same" or "other"
 end
 
+-- Is a profile's class just the game's class? totalRP3 fills a new profile's
+-- class with it, so everyone with TRP installed "has" one. Either gender's
+-- name counts (some locales have both).
+local function isRealClass(custom, m)
+    local c = custom:lower()
+    if m.class and c == m.class:lower() then return true end
+    local f = m.classFile
+    if not f then return false end
+    for _, names in pairs({ LOCALIZED_CLASS_NAMES_MALE, LOCALIZED_CLASS_NAMES_FEMALE }) do
+        if type(names) == "table" and type(names[f]) == "string" and c == names[f]:lower() then return true end
+    end
+    return false
+end
+
 -- Tooltip lines for one guildie (world map and minimap share them).
 function Position.AddTooltip(tt, g)
     local m = ns.Roster.Get(g.key) or {}
@@ -261,17 +275,20 @@ function Position.AddTooltip(tt, g)
             rpHex = ("%02x%02x%02x"):format(math.floor(cr * 255 + 0.5), math.floor(cg * 255 + 0.5), math.floor(cb * 255 + 0.5))
         end
         rpName, rpRace, rpClass = ns.RP.Identity(g.key)
+        if rpClass and isRealClass(rpClass, m) then rpClass = nil end   -- (no "Rogue (Rogue)")
     end
-    -- The class shown (custom or real) in the custom colour too, as TRP does;
-    -- the real class in brackets after a custom one is in its class colour.
-    local shownClass = rpClass or m.class
-    if shownClass and rpHex then shownClass = ("|cff%s%s|r"):format(rpHex, shownClass) end
-    local class = shownClass
-    if rpClass and m.class then
+    -- With either RP setting on, the real class is always in its class colour:
+    -- on its own, or in brackets after a custom class (which is in the custom
+    -- colour, as TRP does). Both settings off: white, as before.
+    local class = m.class
+    if m.class and ns.db and (ns.db.rpColors or ns.db.rpNames) then
         local kr, kg, kb = ns.classColor(m.classFile)
-        local realClass = ("|cff%02x%02x%02x%s|r"):format(math.floor(kr * 255 + 0.5),
+        class = ("|cff%02x%02x%02x%s|r"):format(math.floor(kr * 255 + 0.5),
             math.floor(kg * 255 + 0.5), math.floor(kb * 255 + 0.5), m.class)
-        class = ("%s (%s)"):format(shownClass, realClass)
+    end
+    if rpClass then
+        local custom = rpHex and ("|cff%s%s|r"):format(rpHex, rpClass) or rpClass
+        class = class and ("%s (%s)"):format(custom, class) or custom
     end
     tt:AddLine(rpName or m.name or g.key, r, gg, b)
     local level = g.level or m.level
