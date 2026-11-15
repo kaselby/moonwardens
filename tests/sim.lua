@@ -440,19 +440,20 @@ check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Res
 ---------------------------------------------------------------------------
 local LB = ns.Leaderboard
 local WEEK = 604800
--- Week id: fallback (Tuesday 15:00 UTC), and the client API agreeing with it
+-- Week id: Sunday 15:00 UTC, whatever the game's own reset says
 local nr = LB.NextReset()
 local left = nr - GetServerTime()
-check(left > 0 and left <= WEEK and (nr - 1704207600) % WEEK == 0, "fallback reset on the Tuesday grid")
+check(left > 0 and left <= WEEK and (nr - 1704639600) % WEEK == 0, "reset on the Sunday grid")
+check(os.date("!%A %H:%M", nr) == "Sunday 15:00", "reset is Sunday 15:00 UTC: " .. os.date("!%A %H:%M", nr))
 local wk = LB.Week()
-W.untilReset = left + 3 * 3600   -- a region resetting 3 h later
-check(LB.Week() == wk and LB.NextReset() == nr + 3 * 3600, "client reset API used, same week id")
+W.untilReset = left + 2 * 86400   -- the game's Tuesday reset: ignored now
+check(LB.Week() == wk and LB.NextReset() == nr, "game's weekly reset ignored")
 W.untilReset = nil
 -- Login HQ went out, and the retry (nobody answered)
 local hq1, hq2 = false, false
 for _, m in ipairs(W.sent) do
-    if m.m == "HQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
-    if m.m == "HQ|1|" .. wk .. "|2" then hq2 = true end
+    if m.m == "WQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
+    if m.m == "WQ|1|" .. wk .. "|2" then hq2 = true end
 end
 check(hq1 and hq2, "HQ on login, retry when no HS")
 -- Counting
@@ -465,50 +466,56 @@ W.fire("PLAYER_PVP_KILLS_CHANGED"); W.fire("PLAYER_PVP_KILLS_CHANGED")
 check(LB.Mine() == 1, "one kill, event fired twice: counted once")
 W.map = 1439; W.hk = 32; W.advance(6)
 check(LB.Mine() == 1, "kill in Darkshore not counted")
+W.map, W.subzone = 1442, "Sun Rock Retreat"; W.hk = 33; W.advance(6)
+check(LB.Mine() == 1, "kill elsewhere in Stonetalon not counted")
+W.subzone = "Stonetalon Peak"; W.hk = 34; W.advance(6)
+check(LB.Mine() == 2, "kill at Stonetalon Peak counted")
+W.subzone = ""; W.map = 1440; W.hk = 35; W.advance(6)
+check(LB.Mine() == 3, "back in Ashenvale")
 W.map = 1440; W.hk = 0; W.advance(6); W.hk = 2; W.fire("PLAYER_PVP_KILLS_CHANGED")
-check(LB.Mine() == 3, "counter reset (new day) handled")
+check(LB.Mine() == 5, "counter reset (new day) handled")
 W.instance = true; W.hk = 3; W.advance(6); W.instance = false
-check(LB.Mine() == 3, "kill in an instance (Warsong) not counted")
-local nH = countSent("H")
+check(LB.Mine() == 5, "kill in an instance (Warsong) not counted")
+local nH = countSent("W")
 W.advance(31)
-check(countSent("H") == nH + 1 and lastSent("H").m == "H|1|" .. wk .. "|3", "one debounced H: " .. tostring(lastSent("H") and lastSent("H").m))
+check(countSent("W") == nH + 1 and lastSent("W").m == "W|1|" .. wk .. "|5", "one debounced W: " .. tostring(lastSent("W") and lastSent("W").m))
 W.hk = 4; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
 W.hk = 5; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
-check(countSent("H") == nH + 1, "no second H within 30 s")
+check(countSent("W") == nH + 1, "no second H within 30 s")
 W.advance(25)
-check(countSent("H") == nH + 2 and lastSent("H").m == "H|1|" .. wk .. "|5", "then one H with the latest count")
+check(countSent("W") == nH + 2 and lastSent("W").m == "W|1|" .. wk .. "|7", "then one W with the latest count")
 -- Receiving H
-recv("H|1|" .. wk .. "|50", "Thalanor-Oakheart")
-recv("H|1|" .. wk .. "|40", "Thalanor-Oakheart")
-recv("H|1|" .. wk .. "|99", "Random-Stranger")
-recv("H|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
+recv("W|1|" .. wk .. "|50", "Thalanor-Oakheart")
+recv("W|1|" .. wk .. "|40", "Thalanor-Oakheart")
+recv("W|1|" .. wk .. "|99", "Random-Stranger")
+recv("W|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
 local rows = LB.Rows(wk)
 check(#rows == 2 and rows[1].name == "Thalanor Oakheart" and rows[1].c == 50 and rows[1].level == 60
     and rows[2].key == "sanalune silverwind", "H stored as max, stranger and far week ignored")
 -- Sync: Caelith (online, just heard) is lowest, so she answers attempt 1; I answer attempt 2
-recv("H|1|" .. wk .. "|5", "Caelith-Shade")
+recv("W|1|" .. wk .. "|5", "Caelith-Shade")
 check(LB.Repliers("thalanor oakheart")[1] == "caelith shade", "elected replier: lowest recent name")
-local nHS = countSent("HS")
-recv("HQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
+local nHS = countSent("WS")
+recv("WQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
 W.advance(1)
-check(countSent("HS") == nHS, "not elected: no reply")
-recv("HQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
+check(countSent("WS") == nHS, "not elected: no reply")
+recv("WQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
 W.advance(1)
-local hs = lastSent("HS")
+local hs = lastSent("WS")
 check(hs and hs.ch == "WHISPER" and hs.to == "Thalanor-Oakheart" and hs.m:find("Thalanor-Oakheart:50", 1, true)
-    and hs.m:find("Sanalune-Silverwind:5", 1, true) and hs.m:find("Caelith-Shade:5", 1, true), "HS reply: " .. tostring(hs and hs.m))
-W.fire("CHAT_MSG_ADDON", "MWG1", "HS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
+    and hs.m:find("Sanalune-Silverwind:7", 1, true) and hs.m:find("Caelith-Shade:5", 1, true), "HS reply: " .. tostring(hs and hs.m))
+W.fire("CHAT_MSG_ADDON", "MWG1", "WS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
 rows = LB.Rows(wk)
-check(#rows == 4 and LB.Mine() == 5, "HS merged; my own count not overwritten; stranger not shown")
+check(#rows == 4 and LB.Mine() == 7, "HS merged; my own count not overwritten; stranger not shown")
 -- Chunks stay under 255 bytes and carry everyone
 local big = {}
 for i = 1, 40 do big["member" .. i .. " longsurname"] = { n = ("Member%d Longsurname"):format(i), c = i } end
-ns.db.board[wk - 1] = big
+ns.db.weeks[wk - 1] = big
 local chunks, total = LB.Chunks(wk - 1), 0
 local okLen = true
 for _, c in ipairs(chunks) do
     total = total + #c
-    if #table.concat({ "HS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
+    if #table.concat({ "WS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
 end
 check(#chunks >= 4 and total == 40 and okLen, "chunks: " .. #chunks .. " messages, " .. total .. " entries")
 -- Any kill, not just honorable: PARTY_KILL, matched against the HK counter
@@ -529,14 +536,14 @@ check(LB.Mine() == base + 3, "NPCs and other zones not counted")
 W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
 check(LB.Mine() == base + 4, "HK alone still counts (party kill secret or missed)")
 W.advance(11)
-for k, e in pairs(ns.db.board[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
+for k, e in pairs(ns.db.weeks[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
 -- Page
-ns.db.board[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
-ns.db.board[wk - 6] = { x = { n = "X", c = 1 } }
+ns.db.weeks[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
+ns.db.weeks[wk - 6] = { x = { n = "X", c = 1 } }
 ns.ToggleWindow(5)
 local pg = LB.page
 check(MoonwardensFrame.current == 5 and pg and pg:IsShown(), "leaderboard page opens")
-check(ns.db.board[wk - 6] == nil, "old weeks pruned")
+check(ns.db.weeks[wk - 6] == nil, "old weeks pruned")
 check(pg.rows[1].name:GetText() == "Thalanor Oakheart" and pg.rows[1].n:GetText() == 50
     and pg.rows[1].class:GetText() == "60 Warrior", "row 1")
 local mine

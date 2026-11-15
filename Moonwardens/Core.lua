@@ -78,7 +78,9 @@ local function applyDefaults(db)
         if db[k] == nil then db[k] = v end
     end
     db.char = db.char or {}
-    db.board = db.board or {}   -- leaderboard: week -> key -> {n=name, c=count, cls=class}
+    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Sunday weeks
+    -- (0.6) in `weeks`; the Tuesday weeks of 0.5 in `board` are dropped.
+    if not db.weeks then db.weeks = {}; db.board = nil end
     db.data = db.data or {}     -- research log
     db.schema = 1
 end
