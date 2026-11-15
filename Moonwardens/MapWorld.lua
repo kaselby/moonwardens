@@ -453,9 +453,11 @@ local function buildPanel()
     panel.showDots:SetPoint("TOPLEFT", panel.title, "BOTTOMLEFT", -4, -8)
     panel.showOther = check(panel, "Show other layers", "otherLayers")
     panel.showOther:SetPoint("TOPLEFT", panel.showDots, "BOTTOMLEFT", 0, 2)
+    panel.patrol = check(panel, "Patrol mode", "patrol")
+    panel.patrol:SetPoint("TOPLEFT", panel.showOther, "BOTTOMLEFT", 0, 2)
 
     panel.head = UI.Text(panel, nil, UI.GOLD, "LEFT")
-    panel.head:SetPoint("TOPLEFT", panel.showOther, "BOTTOMLEFT", 4, -10)
+    panel.head:SetPoint("TOPLEFT", panel.patrol, "BOTTOMLEFT", 4, -10)
     panel.head:SetWidth(PANEL_WIDTH - 24)
 
     panel.cards = {}
@@ -533,10 +535,11 @@ local function updatePanel(map, onMap)
     if not panel then return end
     panel.showDots:SetChecked(ns.db.worldDots and true or false)
     panel.showOther:SetChecked(ns.db.otherLayers and true or false)
+    panel.patrol:SetChecked(ns.db.patrol and true or false)
 
     local me = ns.Position.Me()
     local isZone = map and (me.map == map or onMap.direct > 0)
-    local y = -104    -- below the heading
+    local y = -126    -- below the heading
     local shown = 0
     if isZone then
         panel.head:SetText("Layers in " .. mapName(map))
@@ -650,6 +653,7 @@ function MapWorld.Refresh()
     for key, d in pairs(dotOf) do
         if not drawn[key] then d:Hide(); d.g = nil end
     end
+    if ns.Patrol then ns.Patrol.DrawWorld(root, map, L.w, L.h) end
     updatePanel(map, onMap)
     if ns.CompatOpenMap then ns.CompatOpenMap.Apply() end
 end
@@ -660,6 +664,7 @@ end
 placeDots = function(w, h)
     if not (w and w > 0 and h and h > 0) then return end
     L.w, L.h = w, h
+    if ns.Patrol then ns.Patrol.PlaceWorld(w, h) end
     for i = 1, used do
         local d = dots[i]
         if d.fx then
@@ -699,6 +704,7 @@ end
 MapWorld.Halos = function() return halos end   -- (tests)
 
 local function hideAll()
+    if ns.Patrol then ns.Patrol.HideWorld() end
     for _, h in ipairs(halos) do h:Hide() end
     for _, d in pairs(dotOf) do d:Hide(); d.g = nil end
     for i = 1, used do dots[i] = nil end
@@ -771,6 +777,7 @@ function MapWorld.Hover()
     local hits = viewport:IsMouseOver() and ns.DotsUnderCursor(dots, used, HOVER_RADIUS, tip) or {}
     local owner = pinTooltipUp()
     if owner then
+        if ns.Patrol then ns.Patrol.WorldHover(false) end
         ns.HideDotTooltip(tip)            -- (never two boxes)
         if #hits == 0 then return end
         ns.SortHits(hits)
@@ -783,6 +790,12 @@ function MapWorld.Hover()
         joined = { owner = owner, key = key }
         return
     end
+    -- Nothing of the guild's under the cursor: patrol hotspots and sightings.
+    if #hits == 0 and ns.Patrol and ns.Patrol.WorldHover(viewport:IsMouseOver()) then
+        ns.HideDotTooltip(tip)
+        return
+    end
+    if ns.Patrol then ns.Patrol.WorldHover(false) end
     ns.ShowDotTooltip(viewport, hits, tip)
 end
 

@@ -254,6 +254,9 @@ UI.SETTINGS = {
     -- totalRP3 profiles (RP.lua). Without totalRP3 these change nothing.
     { "rpColors", "Show guildies custom Roleplay colors" },
     { "rpNames", "Show guildies custom Roleplay names/class names" },
+    { "Patrol" },
+    { "patrol", "Patrol mode: hotspots and Horde sightings on my maps", function() if ns.Patrol then ns.Patrol.Set(ns.db.patrol) end end },
+    { "shareSightings", "Share the Horde I see with the guild" },
     -- Research section ("Help collect layer data") comes back with the data log (0.6).
 }
 

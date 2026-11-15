@@ -282,7 +282,11 @@ local function updatePip(map, px, py, w, h, ppy, facing, half)
 end
 
 function MapMini.Update()
-    if inInstance() then hideFrom(0); hideHalos(); pip:Hide(); return end
+    if inInstance() then
+        hideFrom(0); hideHalos(); pip:Hide()
+        if ns.Patrol then ns.Patrol.HideMini() end
+        return
+    end
     local map, px, py = ns.Position.ReadMine()
     if map and px then
         local w, h = MapMini.ZoneSize(map)
@@ -291,9 +295,12 @@ function MapMini.Update()
             local facing = rotating() and ns.try(GetPlayerFacing) or nil
             if facing and type(facing) ~= "number" then facing = nil end
             updatePip(map, px, py, w, h, half / MapMini.ViewRadius(), facing, half)
+            if ns.Patrol then ns.Patrol.DrawMini(holder, map, px, py, w, h, half / MapMini.ViewRadius(), facing, half) end
+        elseif ns.Patrol then ns.Patrol.HideMini()
         end
     else
         pip:Hide()
+        if ns.Patrol then ns.Patrol.HideMini() end
     end
     if not ns.db.minimapDots then hideFrom(0); hideHalos(); return end
     local map, px, py = ns.Position.ReadMine()

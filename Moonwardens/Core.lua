@@ -1,6 +1,6 @@
 -- Core: namespace, saved settings, events, timers, safe reads, slash command.
 local ADDON, ns = ...
-ns.VERSION = "0.5.5-test"
+ns.VERSION = "0.6.0-test"
 _G.Moonwardens = ns -- for /dump and other addons; nothing reads it back
 
 ---------------------------------------------------------------------------
@@ -71,6 +71,7 @@ ns.DEFAULTS = {
     worldDots = true, otherLayers = true, minimapDots = true,
     rpColors = false, rpNames = false, -- totalRP3 profiles on the dots (RP.lua)
     dataCollection = true, minimapAngle = 200, mapKill = false,
+    patrol = false, shareSightings = true, -- Patrol.lua
 }
 
 local function applyDefaults(db)

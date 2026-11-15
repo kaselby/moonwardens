@@ -577,6 +577,116 @@ SlashCmdList.MOONWARDENS("hk")
 check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
 
+---------------------------------------------------------------------------
+-- Patrol: sightings and hotspots
+---------------------------------------------------------------------------
+local PT = ns.Patrol
+W.map, W.subzone, W.instance, W.pos = 1440, "", false, { 0.61, 0.50 }   -- at Raynewood Retreat
+check(ns.db.patrol == false and ns.db.shareSightings == true, "patrol off, sharing on by default")
+W.unitNames = W.unitNames or {}
+W.unitNames.nameplate7 = "Grukk"; W.players.nameplate7 = { faction = "Horde", class = "WARRIOR", level = 30 }
+W.unitNames.nameplate8 = "Elwyn"; W.players.nameplate8 = { faction = "Alliance", class = "MAGE", level = 40 }
+local nS = countSent("S")
+W.fire("NAME_PLATE_UNIT_ADDED", "nameplate7")
+W.fire("NAME_PLATE_UNIT_ADDED", "nameplate8")
+local seenT = PT.Debug()
+check(seenT["grukk"] and seenT["grukk"].cls == "WARRIOR" and seenT["grukk"].level == 30 and not seenT["elwyn"],
+    "Horde nameplate recorded, Alliance not")
+W.advance(3)
+check(countSent("S") == nS + 1 and lastSent("S").m:find("|1440|0.6100|0.5000|Grukk:WARRIOR:30", 1, true), "sighting sent: " .. tostring(lastSent("S") and lastSent("S").m))
+W.fire("PLAYER_TARGET_CHANGED"); W.units.target = nil
+W.fire("NAME_PLATE_UNIT_ADDED", "nameplate7"); W.advance(3)
+check(countSent("S") == nS + 1, "same player not sent again within a minute")
+W.map = 1439
+W.unitNames.nameplate9 = "Zug"; W.players.nameplate9 = { faction = "Horde", class = "ROGUE", level = 25 }
+W.fire("NAME_PLATE_UNIT_ADDED", "nameplate9"); W.advance(3)
+check(not PT.Debug()["zug"], "not recorded outside the tracked areas")
+W.map = 1440
+-- A guildie's report: stored, and I don't repeat it for 30 s
+recv("S|1|1440|0.2670|0.3670|Mok-Ironhide:SHAMAN:28,Bad", "Thalanor-Oakheart")
+local mok = PT.Debug()["mok ironhide"]
+check(mok and mok.by == "thalanor oakheart" and mok.cls == "SHAMAN" and mok.name == "Mok Ironhide", "guildie's sighting stored")
+recv("S|1|1440|0.5|0.5|Sanalune-Silverwind:DRUID:60,Caelith-Shade:ROGUE:33", "Thalanor-Oakheart")
+check(not PT.Debug()["caelith shade"] and not PT.Debug()["sanalune silverwind"], "guildies never stored as sightings")
+W.unitNames.nameplate5 = "Mok Ironhide"; W.players.nameplate5 = { faction = "Horde", class = "SHAMAN", level = 28 }
+nS = countSent("S")
+W.fire("NAME_PLATE_UNIT_ADDED", "nameplate5"); W.advance(3)
+check(countSent("S") == nS, "just reported by a guildie: not sent again")
+check(PT.Debug()["mok ironhide"].by == ns.meKey, "my newer sighting replaces the guildie's")
+recv("S|1|1440|0.2670|0.3670|Mok-Ironhide:SHAMAN:28", "Thalanor-Oakheart")   -- (back at Maestra's Post)
+-- Hotspots: where a sighting is, and the last time Horde were at one
+local maestra, rayne
+for _, sp in ipairs(PT.HOTSPOTS) do
+    if sp.name == "Maestra's Post" then maestra = sp end
+    if sp.name == "Raynewood Retreat" then rayne = sp end
+end
+check(PT.SpotAt(1440, 0.2670, 0.3670) == maestra, "sighting placed at a hotspot")
+local last, nAt = PT.LastAt(rayne)
+check(last and last.key == "grukk" and nAt == 1, "last Horde at Raynewood")
+-- Many at once: chunked under 255 bytes
+for i = 1, 20 do
+    local tok = "nameplate" .. (20 + i)
+    W.unitNames[tok] = "Longname" .. i .. " Surnamebloodfist"
+    W.players[tok] = { faction = "Horde", class = "WARLOCK", level = 60 }
+    W.fire("NAME_PLATE_UNIT_ADDED", tok)
+end
+nS = countSent("S")
+W.advance(4)
+check(countSent("S") >= nS + 2, "twenty sightings split over several messages")
+-- Patrol mode off: nothing drawn
+WorldMapFrame:Hide(); WorldMapFrame:Show(); W.shownMap = 1440
+W.advance(0.3)
+local _, PW, PM = PT.Debug()
+local shownSpots = 0
+for _, p in ipairs(PW.spots) do if p:IsShown() then shownSpots = shownSpots + 1 end end
+check(shownSpots == 0, "patrol off: no hotspots on the world map")
+SlashCmdList.MOONWARDENS("patrol on")
+check(ns.db.patrol == true, "/mw patrol on")
+W.advance(0.3)
+shownSpots = 0
+for _, p in ipairs(PW.spots) do if p:IsShown() then shownSpots = shownSpots + 1 end end
+local shownMarks = 0
+for _, m in ipairs(PW.marks) do if m:IsShown() then shownMarks = shownMarks + 1 end end
+check(shownSpots == #PT.HOTSPOTS and shownMarks >= 3, "patrol on: hotspots and sightings on the world map: " .. shownSpots .. "/" .. shownMarks)
+local mp
+for _, p in ipairs(PW.spots) do if p.item == maestra then mp = p end end
+check(mp and mp.label:GetText():find("Maestra's Post", 1, true) and mp.label:GetText():find("just now", 1, true), "hotspot label with last seen: " .. tostring(mp and mp.label:GetText()))
+GameTooltip:Hide()
+W.cursor = { mp._cx, mp._cy }
+W.advance(0.1)
+local ptip = table.concat(GameTooltip.lines, "\n")
+check(ptip:find("Maestra's Post", 1, true) and ptip:find("Horde seen here just now", 1, true) and ptip:find("Mok Ironhide", 1, true),
+    "hotspot hover tooltip: " .. ptip)
+W.cursor = { 0, 0 }
+W.advance(0.1)
+check(not GameTooltip:IsShown(), "hotspot tooltip goes when the cursor leaves")
+-- Minimap: Raynewood and my own sightings are in range
+W.advance(0.1)
+local mSpots, mMarks = 0, 0
+for _, p in ipairs(PM.spots) do if p:IsShown() then mSpots = mSpots + 1 end end
+for _, m in ipairs(PM.marks) do if m:IsShown() then mMarks = mMarks + 1 end end
+check(mSpots == 1 and mMarks >= 1, "minimap: nearby hotspot and sightings: " .. mSpots .. "/" .. mMarks)
+-- Page
+ns.ToggleWindow(6)
+local pp = PT.page
+check(pp and pp:IsShown() and pp.toggle:GetText() == "End patrol", "patrol page opens")
+local row1 = pp.sights[1]
+check(row1:IsShown() and row1.name:GetText():find("Longname", 1, true) and row1.name:GetText():find("60", 1, true)
+    and row1.where:GetText() == "Raynewood Retreat" and row1.ago:GetText() == "just now", "sighting row: who, where, when")
+local spotRow
+for _, r in ipairs(pp.spots) do if r:IsShown() and r.name:GetText() == "Maestra's Post" then spotRow = r end end
+check(spotRow and spotRow.last:GetText():find("Horde just now", 1, true), "hotspot row: " .. tostring(spotRow and spotRow.last:GetText()))
+pp.toggle._scripts.OnClick(pp.toggle)
+check(ns.db.patrol == false and pp.toggle:GetText() == "Start patrol", "page button ends the patrol")
+ns.ToggleWindow()
+W.advance(0.3)
+shownSpots = 0
+for _, p in ipairs(PW.spots) do if p:IsShown() then shownSpots = shownSpots + 1 end end
+check(shownSpots == 0, "patrol off again: hotspots gone")
+-- Old sightings expire
+W.advance(1801)
+check(#PT.Recent() == 0, "sightings forgotten after 30 min")
+
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
 local errs = {}

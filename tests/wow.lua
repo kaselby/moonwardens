@@ -226,7 +226,13 @@ function IsInInstance() if W.instance then return true, "party" end return false
 W.combat = false
 function UnitAffectingCombat() return W.combat end
 function UnitIsDeadOrGhost() return false end
-function UnitLevel() return 60 end
+-- Enemy and other players for patrol: W.players[token] = { faction, class, level }
+-- (names in W.unitNames).
+W.players = {}
+function UnitLevel(u) local p = W.players[u]; if p then return p.level end return 60 end
+function UnitIsPlayer(u) return u == "player" or W.players[u] ~= nil end
+function UnitFactionGroup(u) if u == "player" then return "Alliance" end local p = W.players[u]; return p and p.faction end
+function UnitClass(u) local p = W.players[u]; if p then return p.class, p.class end return "Druid", "DRUID" end
 function GetGuildInfo() return "Moonwardens", "Warden-General", 0 end
 function IsIndoors() return false end
 W.radius = 233.33
