@@ -195,6 +195,7 @@ W.maps = {
     [1440] = { name = "Ashenvale", ox = 0, oy = 0, w = 5767, h = 3844 },
     [1414] = { name = "Kalimdor", ox = -20000, oy = -10000, w = 40000, h = 30000 },
     [1439] = { name = "Darkshore", ox = 0, oy = -6000, w = 6000, h = 6000 },
+    [1442] = { name = "Stonetalon Mountains", ox = -6000, oy = 0, w = 6000, h = 6000 },
 }
 function CreateVector2D(x, y)
     return { x = x, y = y, GetXY = function(v) return v.x, v.y end }
@@ -285,6 +286,9 @@ function GetBindingKey(b) if b == "MOONWARDENS_RESPOND" then return "ALT-R" end 
 W.hk = nil            -- GetPVPSessionStats() kills; nil = not available yet
 function GetPVPSessionStats() return W.hk, 0 end
 function GetZoneText() return W.maps[W.map] and W.maps[W.map].name or "" end
+W.subzone = ""
+function GetSubZoneText() return W.subzone end
+function GetMinimapZoneText() return W.subzone ~= "" and W.subzone or GetZoneText() end
 W.untilReset = nil    -- set to make C_DateAndTime.GetSecondsUntilWeeklyReset exist
 C_DateAndTime = setmetatable({}, { __index = function(_, k)
     if k == "GetSecondsUntilWeeklyReset" and W.untilReset then return function() return W.untilReset end end
