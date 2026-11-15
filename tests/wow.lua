@@ -88,6 +88,7 @@ WorldFrame = W.new("Frame", "WorldFrame")
 GameTooltip = W.new("GameTooltip", "GameTooltip")
 GameTooltip.lines = {}
 function GameTooltip:AddLine(t) table.insert(self.lines, t) end
+function GameTooltip:AddDoubleLine(a, b) table.insert(self.lines, a .. "  " .. tostring(b)) end
 function GameTooltip:SetOwner(o) self.lines = {}; self._owner = o end
 function GameTooltip:GetOwner() return self._owner end
 function GameTooltip:NumLines() return #self.lines end

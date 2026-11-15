@@ -175,6 +175,12 @@ check(tdot.rel == "same" and tdot:GetAlpha() == 0.8, "same layer dot: slightly f
 check(panel and panel:IsShown() and panel.head:GetText() == "Layers in Ashenvale", "side panel heading")
 check(panel.cards[1].name:GetText() == "Layer 1" and panel.cards[2].name:GetText():find("Layer 2", 1, true)
     and panel.cards[2].name:GetText():find("you", 1, true) and panel.cards[2].count:GetText() == "2 guildies", "layer cards")
+-- Hovering a layer card lists who is on it
+panel.cards[2]._scripts.OnEnter(panel.cards[2])
+local ctip = table.concat(GameTooltip.lines, "\n")
+check(ctip:find("Layer 2 (yours)", 1, true) and ctip:find("Thalanor Oakheart  level 60", 1, true)
+    and ctip:find("Sanalune Silverwind  you", 1, true) and not ctip:find("Caelith", 1, true), "layer card tooltip: " .. ctip)
+panel.cards[2]._scripts.OnLeave(panel.cards[2])
 
 -- Hover
 GameTooltip:Hide() -- (nobody else's tooltip up: ours steps back for those)

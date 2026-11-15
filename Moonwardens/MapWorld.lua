@@ -475,7 +475,7 @@ local function buildPanel()
     end
     panel.note = UI.Text(panel, "small", UI.GREY, "LEFT")
     panel.note:SetWidth(PANEL_WIDTH - 24)
-    panel.note:SetText("Experimental. Layers are worked out from nearby creatures and can be wrong, especially in cities.")
+    panel.note:SetText("Hover a layer to see who is on it. Experimental: layers are worked out from nearby creatures and can be wrong, especially in cities.")
 end
 
 local function card(i)
@@ -487,8 +487,39 @@ local function card(i)
     c.name = ns.UI.Text(c, nil, ns.UI.GOLD, "LEFT"); c.name:SetPoint("TOPLEFT", 8, -6)
     c.count = ns.UI.Text(c, "small", nil, "LEFT"); c.count:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, -2)
     c.server = ns.UI.Text(c, "small", ns.UI.GREY, "RIGHT"); c.server:SetPoint("TOPRIGHT", -8, -7)
+    -- Hover: who is on this layer (Krylea, 11-15).
+    c:EnableMouse(true)
+    c:SetScript("OnEnter", function(self) MapWorld.CardTooltip(self) end)
+    c:SetScript("OnLeave", function(self) if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
     panel.cards[i] = c
     return c
+end
+
+-- Names on a layer card, class-coloured, sorted; me marked.
+local CARD_NAMES = 25
+function MapWorld.CardTooltip(c)
+    local keys = c.keys
+    if not keys or #keys == 0 then return end
+    local rows = {}
+    for _, key in ipairs(keys) do
+        local m = ns.Roster.Get(key) or {}
+        local g = ns.Position.Get(key)
+        rows[#rows + 1] = { key = key, name = m.name or (key == ns.meKey and ns.me) or key,
+            cls = m.classFile, level = (g and g.level) or m.level }
+    end
+    table.sort(rows, function(a, b) return a.name < b.name end)
+    GameTooltip:SetOwner(c, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(c.title or "Layer", 1, 0.82, 0)
+    for i = 1, math.min(#rows, CARD_NAMES) do
+        local r = rows[i]
+        local cr, cg, cb = ns.classColor(r.cls)
+        local right = r.key == ns.meKey and "you" or (r.level and ("level " .. r.level) or "")
+        GameTooltip:AddDoubleLine(r.name, right, cr, cg, cb, 0.62, 0.62, 0.62)
+    end
+    if #rows > CARD_NAMES then
+        GameTooltip:AddLine(("and %d more"):format(#rows - CARD_NAMES), 0.62, 0.62, 0.62)
+    end
+    GameTooltip:Show()
 end
 
 local function plural(n) return n == 1 and "1 guildie" or n .. " guildies" end
@@ -509,14 +540,16 @@ local function updatePanel(map, onMap)
     local shown = 0
     if isZone then
         panel.head:SetText("Layers in " .. mapName(map))
-        local list, unknown = ns.Position.LayersIn(map)
+        local list, unknown, unknownKeys = ns.Position.LayersIn(map)
         local rows = {}
         for _, e in ipairs(list) do rows[#rows + 1] = e end
-        if unknown > 0 then rows[#rows + 1] = { unknownRow = true, n = unknown } end
+        if unknown > 0 then rows[#rows + 1] = { unknownRow = true, n = unknown, keys = unknownKeys } end
         for i, e in ipairs(rows) do
             local c = card(i)
             c:ClearAllPoints()
             c:SetPoint("TOPLEFT", 12, y)
+            c.keys = e.keys
+            c.title = e.unknownRow and "Layer not known" or (e.label .. (e.mine and " (yours)" or ""))
             if e.unknownRow then
                 c.name:SetText("Layer not known")
                 c.name:SetTextColor(0.75, 0.75, 0.75)

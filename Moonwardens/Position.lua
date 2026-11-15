@@ -208,25 +208,31 @@ end
 -- with the same data sees the same "Layer 2".
 ---------------------------------------------------------------------------
 
--- Sorted list of { layer, n, mine } for a map, plus the unknown count.
+-- Sorted list of { layer, n, mine, keys } for a map, plus the unknown count
+-- and the keys of those whose layer is unknown. `keys`: who is on it (me too).
 function Position.LayersIn(map)
-    local by, unknown = {}, 0
-    local function add(layer, isMe)
-        if not layer or layer == 0 then unknown = unknown + 1; return end
-        local e = by[layer] or { layer = layer, n = 0 }
+    local by, unknown, unknownKeys = {}, 0, {}
+    local function add(layer, key, isMe)
+        if not layer or layer == 0 then
+            unknown = unknown + 1
+            unknownKeys[#unknownKeys + 1] = key
+            return
+        end
+        local e = by[layer] or { layer = layer, n = 0, keys = {} }
         e.n = e.n + 1
+        e.keys[#e.keys + 1] = key
         if isMe then e.mine = true end
         by[layer] = e
     end
-    for _, g in pairs(Position.All()) do
-        if g.map == map then add(g.layer) end
+    for key, g in pairs(Position.All()) do
+        if g.map == map then add(g.layer, key) end
     end
-    if me.map == map then add(myLayer(map), true) end
+    if me.map == map and ns.meKey then add(myLayer(map), ns.meKey, true) end
     local list = {}
     for _, e in pairs(by) do list[#list + 1] = e end
     table.sort(list, function(a, b) return a.layer < b.layer end)
     for i, e in ipairs(list) do e.label = "Layer " .. i end
-    return list, unknown
+    return list, unknown, unknownKeys
 end
 
 function Position.LayerLabel(map, layer)
