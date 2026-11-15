@@ -247,6 +247,19 @@ check(GameTooltip:GetOwner() == UIParent and mtip:find("Thalanor Oakheart", 1, t
 W.cursor = { 0, 0 }
 Minimap_OnUpdate(Minimap)
 check(#GameTooltip.lines == 0, "minimap hover: nothing under the cursor, no lines")
+-- Dots take mouse motion: entering one shows our tooltip on it when the
+-- game's hover hook isn't seen working (Minimap kept its own OnUpdate)
+W.advance(0.3)
+W.cursor = { md[1]._cx + 1, md[1]._cy }
+GameTooltip:Hide(); GameTooltip.lines = {}
+md[1]._scripts.OnEnter(md[1])
+check(GameTooltip:GetOwner() == md[1] and table.concat(GameTooltip.lines, "\n"):find("Thalanor Oakheart", 1, true),
+    "minimap dot hover: our tooltip on the dot")
+W.advance(0.2)
+check(GameTooltip:GetOwner() == md[1] and GameTooltip:IsShown(), "minimap dot hover: kept while hovering")
+md[1]._scripts.OnLeave(md[1])
+check(not GameTooltip:IsShown(), "minimap dot hover: hidden on leave")
+W.cursor = { 0, 0 }
 ns.db.minimapDots = false
 W.advance(0.2)
 check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")

@@ -48,7 +48,9 @@ local function gameHovering()
     return ok and fn ~= nil
 end
 
-local dbg = { hook = 0, added = 0 }   -- counters for /mw hover
+local dbg = { hook = 0, added = 0, dot = 0 }   -- counters for /mw hover
+local addedAt = -10         -- when the game-hover hook last added our lines
+local hoverDot              -- our dot under the mouse (dots take mouse motion, not clicks)
 
 -- Guildies whose dots are under the cursor, sorted by name (a stable order).
 local function hovered()
@@ -92,6 +94,50 @@ local function afterGameHover()
     addLines(GameTooltip, hits)
     GameTooltip:Show()
     dbg.added = dbg.added + 1
+    addedAt = ns.now()
+end
+
+-- Is the hook above really putting our lines in the game's tooltip? If the
+-- minimap kept its own reference to Minimap_OnUpdate, hooking the global
+-- never runs (a likely reason 0.5.2-0.5.4 showed nothing in game), so we
+-- trust it only while it is seen working.
+local function hookWorking()
+    return gameDrives and gameHovering() and ns.now() - addedAt < 0.2
+end
+
+-- Dots take mouse motion (not clicks: pings and clicks still reach the
+-- minimap), so the mouse over a dot is the game telling us, as for any
+-- minimap pin addon (HandyNotes, GatherMate). The tooltip is ours, on the dot,
+-- with every guildie whose dot is under the cursor.
+local function showDotTooltip(d)
+    local hits = ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
+    if #hits == 0 and d.g then hits = { { d = d, dist = 0 } } end
+    if #hits == 0 then return end
+    local setKey = ns.HitsKey(hits)
+    if setKey == tipKey and GameTooltip:IsShown() and GameTooltip:GetOwner() == d then return end
+    GameTooltip:SetOwner(d, "ANCHOR_CURSOR")
+    addLines(GameTooltip, hits)
+    GameTooltip:Show()
+    tipKey = setKey
+    dbg.dot = dbg.dot + 1
+end
+
+local function makeHoverable(d)
+    if d.SetMouseMotionEnabled then
+        pcall(d.SetMouseMotionEnabled, d, true)
+        if d.SetMouseClickEnabled then pcall(d.SetMouseClickEnabled, d, false) end
+    else
+        d:EnableMouse(true)
+    end
+    d:SetScript("OnEnter", ns.guard(function(self)
+        hoverDot = self
+        if not hookWorking() then showDotTooltip(self) end
+    end, "minimap dot hover"))
+    d:SetScript("OnLeave", ns.guard(function(self)
+        if hoverDot == self then hoverDot = nil end
+        if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+        tipKey = nil
+    end, "minimap dot leave"))
 end
 
 -- Every hover tick (clients without Minimap_OnUpdate only): own GameTooltip
@@ -164,7 +210,15 @@ local function rotating()
 end
 
 local function hideFrom(n)
-    for i = n + 1, used do dots[i]:Hide(); dots[i].g = nil end
+    for i = n + 1, used do
+        local d = dots[i]
+        d:Hide(); d.g = nil
+        if hoverDot == d then
+            hoverDot = nil
+            if GameTooltip:GetOwner() == d then GameTooltip:Hide() end
+            tipKey = nil
+        end
+    end
     used = n
 end
 
@@ -260,7 +314,7 @@ function MapMini.Update()
                 if dx * dx + dy * dy <= limit * limit then
                     n = n + 1
                     local d = dots[n]
-                    if not d then d = ns.NewDot(holder, DOT_SIZE, "diamond"); dots[n] = d end
+                    if not d then d = ns.NewDot(holder, DOT_SIZE, "diamond"); makeHoverable(d); dots[n] = d end
                     d.g = g
                     ns.StyleDot(d, g, rel)
                     d:SetPoint("CENTER", holder, "CENTER", math.floor(dx * 2 + 0.5) / 2, math.floor(dy * 2 + 0.5) / 2)
@@ -281,10 +335,15 @@ local function onUpdate(_, elapsed)
     hoverAcc = hoverAcc + elapsed
     if hoverAcc >= 0.05 then
         hoverAcc = 0
-        -- The game's hover rebuilds the tooltip itself (our hook adds to it);
-        -- when it isn't running (no hook, or the focus is on something else
-        -- over the minimap), we show the tooltip ourselves.
-        if not (gameDrives and gameHovering()) then updateHover() end
+        -- A dot under the mouse: our tooltip on it (kept up to date as dots
+        -- move), unless the game's hover is running and our hook is adding to
+        -- its tooltip. Otherwise, as before: the game's hover with our hook,
+        -- or our own tooltip when that isn't seen working.
+        if hoverDot and hoverDot:IsShown() and hoverDot.g then
+            if not hookWorking() then showDotTooltip(hoverDot) end
+        elseif not hookWorking() then
+            updateHover()
+        end
     end
 end
 
@@ -334,11 +393,12 @@ ns.slash.hover = { help = "debug: hover a guildie on the minimap for 15 s", fn =
             local fname = focus and (ns.try(focus.GetDebugName, focus) or ns.try(focus.GetName, focus)) or "none"
             local owner = GameTooltip:GetOwner()
             local oname = owner and (ns.try(owner.GetDebugName, owner) or ns.try(owner.GetName, owner)) or "none"
-            ns.print(("%d: hooked %s, game hover %s, over %s, focus %s, dots %d, nearest %s px (r %d), tip %s/%s, hook calls %d, added %d"):format(
-                t, tostring(gameDrives), tostring(gameHovering()), tostring(overMinimap()), tostring(fname), used,
+            ns.print(("%d: hooked %s, game hover %s, over %s, focus %s, dot %s, dots %d, nearest %s px (r %d), tip %s/%s, hook calls %d, added %d, dot tips %d"):format(
+                t, tostring(gameDrives), tostring(gameHovering()), tostring(overMinimap()), tostring(fname),
+                tostring(hoverDot ~= nil), used,
                 best and ("%.1f"):format(best) or "-", HOVER_RADIUS, GameTooltip:IsShown() and "shown" or "hidden",
-                tostring(oname), dbg.hook, dbg.added))
-            dbg.hook, dbg.added = 0, 0
+                tostring(oname), dbg.hook, dbg.added, dbg.dot))
+            dbg.hook, dbg.added, dbg.dot = 0, 0, 0
         end, "hover debug")
     end
 end }
