@@ -175,7 +175,15 @@ local seenAt = {}              -- key -> time I last saw them
 local function noteSeen(unit)
     if ns.try(UnitIsPlayer, unit) ~= true then return end
     local key = unitKey(unit)
-    if key and ns.Roster.Get(key) then seenAt[key] = ns.now() end
+    if not (key and ns.Roster.Get(key)) then return end
+    seenAt[key] = ns.now()
+    -- If they know their layer here and I don't, it's mine too: take it, so
+    -- my own reports carry it (the next NPC I see confirms or replaces it).
+    local g = guildies[key]
+    if g and me.map and g.map == me.map and g.layer and g.layer > 0
+        and ns.Layer and ns.Layer.Adopt then
+        ns.Layer.Adopt(me.map, g.layer, key)
+    end
 end
 
 local function scanPlayerPlates()
@@ -186,11 +194,21 @@ local function scanPlayerPlates()
         local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
         if u then noteSeen(u) end
     end
+    -- A guildie kept as target or focus stays "seen" (no event while held).
+    noteSeen("target"); noteSeen("focus")
 end
 
 function Position.SeenRecently(key)
     local at = seenAt[key]
     return at ~= nil and ns.now() - at <= SEEN_FOR
+end
+
+-- A guildie's layer as far as I can tell: what they report, or mine when
+-- they don't know theirs but I can see them (seeing them proves it). 0: unknown.
+function Position.LayerOf(g)
+    if g.layer and g.layer > 0 then return g.layer end
+    if g.map == me.map and Position.SeenRecently(g.key) then return myLayer(me.map) end
+    return 0
 end
 
 function Position.CountInMyZone()
@@ -225,7 +243,7 @@ function Position.LayersIn(map)
         by[layer] = e
     end
     for key, g in pairs(Position.All()) do
-        if g.map == map then add(g.layer, key) end
+        if g.map == map then add(Position.LayerOf(g), key) end
     end
     if me.map == map and ns.meKey then add(myLayer(map), ns.meKey, true) end
     local list = {}
@@ -307,7 +325,7 @@ function Position.AddTooltip(tt, g)
     if Position.HasFlag(g, Position.FLAG_DEAD) then tt:AddLine("Dead", 0.62, 0.62, 0.62)
     elseif Position.HasFlag(g, Position.FLAG_COMBAT) then tt:AddLine("In combat", 1, 0.25, 0.25) end
     local rel = Position.Relation(g)
-    local label = Position.LayerLabel(g.map, g.layer)
+    local label = Position.LayerLabel(g.map, Position.LayerOf(g))
     if rel == "same" then tt:AddLine((label or "Layer") .. " (same as you)", 0.75, 0.75, 0.75)
     elseif rel == "other" then tt:AddLine((label or "Layer") .. " (not yours)", 0.75, 0.75, 0.75)
     elseif rel == "unknown" then tt:AddLine("Layer not known yet", 0.62, 0.62, 0.62) end

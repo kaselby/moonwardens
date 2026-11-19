@@ -275,8 +275,12 @@ function UnitName(u)
         if n then local a, b = n:match("(%S+) (%S+)"); return a, b end
         return nil
     end
+    local unit = W.units[u]
+    if unit and unit.name then return unit.name:match("(%S+) (%S+)") end
     return oldUnitName(u)
 end
+-- Players for the "seen in the world" check: W.units[token].name = "First Last"
+function UnitIsPlayer(u) return W.units[u] ~= nil and W.units[u].name ~= nil end
 function InviteUnit(name) table.insert(W.invites, name) end
 function ConvertToRaid() W.converted = W.converted + 1; W.raid = true end
 function AcceptGroup() W.accepted = W.accepted + 1 end

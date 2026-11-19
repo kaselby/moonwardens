@@ -345,6 +345,33 @@ check(Lr.Mine(1440) == 0, "forgotten after 10 min")
 W.units = {}
 SlashCmdList.MOONWARDENS("layer")
 check(W.prints[#W.prints]:find("experimental", 1, true), "/mw layer")
+-- Seeing a guildie settles layers (11-19, Kira and Shandor side by side).
+-- 1) I don't know mine; a guildie I can see reports 7062 here: I take it.
+W.advance(1.5)
+check(Lr.Mine(1440) == 0, "unknown before seeing a guildie")
+recv("P|1|1440|0.5010|0.5000|7062|0|60", "Thalanor-Oakheart")
+W.units.target = { guid = "Player-0-7062-0002", name = "Thalanor Oakheart" }
+W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7062, "layer taken from a guildie I can see")
+W.advance(1.5)
+check(lastSent("P").m:match("^P|1|1440|[%d.]+|[%d.]+|7062|"), "and my P carries it: " .. lastSent("P").m)
+W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075, "one NPC replaces a taken layer")
+-- 2) I know mine (7075); a guildie I can see doesn't know theirs: same as mine.
+recv("P|1|1440|0.5010|0.5000|0|0|60", "Thalanor-Oakheart")
+W.units.target = { guid = "Player-0-7062-0002", name = "Thalanor Oakheart" }
+W.fire("PLAYER_TARGET_CHANGED")
+local tg = ns.Position.All()["thalanor oakheart"]
+check(ns.Position.Relation(tg) == "same" and ns.Position.LayerOf(tg) == 7075, "unknown guildie I can see is on my layer")
+local ll, lunk = ns.Position.LayersIn(1440)
+local onMine = false
+for _, e in ipairs(ll) do if e.layer == 7075 then for _, k in ipairs(e.keys) do if k == "thalanor oakheart" then onMine = true end end end end
+check(onMine and lunk == 0, "layer list puts them on my layer, not 'not known'")
+W.advance(40)   -- still targeted: the held target keeps counting
+check(ns.Position.Relation(tg) == "same", "held target still counts as seen")
+W.units = {}
+W.advance(40)
+check(ns.Position.Relation(tg) == "unknown", "out of sight for 30 s: unknown again")
 
 ---------------------------------------------------------------------------
 -- Phase 4: alerts

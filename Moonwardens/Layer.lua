@@ -85,7 +85,7 @@ function Layer.Observe(guid, src)
     stats.used = stats.used + 1
 
     if server == state.layer then
-        state.at, state.n = ns.now(), state.n + 1
+        state.at, state.n, state.from = ns.now(), state.n + 1, nil
         cand = {}
         recheck = false
         return true
@@ -103,6 +103,20 @@ function Layer.Observe(guid, src)
         ns.fire("LAYER", map, from, server, src)
     end
     return true
+end
+
+-- A guildie I can see reports `layer` here, and I have none: it's mine
+-- (players on other layers can't be seen). Held loosely: the next NPC seen
+-- confirms it or replaces it, as after a loading screen.
+function Layer.Adopt(map, layer, who)
+    if type(layer) ~= "number" or layer <= 0 then return end
+    if currentMap() ~= map then return end
+    if Layer.Mine(map) ~= 0 then return end
+    state = { map = map, layer = layer, at = ns.now(), n = 0, from = who }
+    cand = {}
+    recheck = true
+    lastEvent = { why = "seen guildie " .. tostring(who), at = ns.now(), kind = "taken" }
+    ns.fire("LAYER", map, nil, layer, "guildie")
 end
 
 local function observeUnit(unit, src)
@@ -161,6 +175,7 @@ ns.slash.layer = { help = "your layer in this zone and how it was found", fn = f
     else
         ns.print(("you are on %s here (server number %d), confirmed by %d sightings, last %d s ago."):format(
             ns.Position.LayerLabel(map, mine) or "a layer", mine, state.n, ns.now() - state.at))
+        if state.from then ns.print(("  taken from %s, whom you could see."):format(state.from)) end
     end
     if recheck then ns.print("  rechecking: the next NPC seen will confirm or replace it.") end
     if cand.layer then ns.print(("  a different number (%d) was seen %d time(s); two NPCs are needed to switch."):format(cand.layer, cand.n)) end
