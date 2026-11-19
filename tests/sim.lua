@@ -592,6 +592,38 @@ SlashCmdList.MOONWARDENS("hk")
 check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
 
+---------------------------------------------------------------------------
+-- Update reminder (V messages)
+---------------------------------------------------------------------------
+local Ver = ns.Comm.Version
+check(Ver.Newer("0.6.0", "0.6.0-test") and not Ver.Newer("0.6.0-test", "0.6.0"), "a release is newer than its test build")
+check(Ver.Newer("0.10.0", "0.9.9") and Ver.Newer("0.6.1-test", "0.6.0") and not Ver.Newer("0.6.0", "0.6.0"), "version order")
+check(countSent("V") >= 1 and lastSent("V").m == "V|1|" .. ns.VERSION, "my version said after login")
+local before = #W.prints
+recv("V|1|0.7.0", "Thalanor-Oakheart")
+check(#W.prints == before and Ver.Newest() == nil, "one non-officer saying 0.7.0 is not enough")
+recv("V|1|9.9.9-test", "Caelith-Shade"); recv("V|1|9.9.9-test", "Thalanor-Oakheart")
+check(Ver.Newest() == nil, "test builds never prompt an update")
+recv("V|1|0.7.0", "Caelith-Shade")
+check(Ver.Newest() == "0.7.0" and W.prints[#W.prints]:find("0.7.0 is out", 1, true), "two guildies: update reminder")
+recv("V|1|0.7.1", "Thalanor-Oakheart"); recv("V|1|0.7.1", "Caelith-Shade")
+check(#W.prints == before + 1 and Ver.Newest() == "0.7.1", "said once per session; tooltip follows the newest")
+local mt = { lines = {}, AddLine = function(self, l) self.lines[#self.lines + 1] = l end }
+ns.UI.MinimapTooltip(mt)
+check(table.concat(mt.lines, "\n"):find("Update available: 0.7.1", 1, true), "minimap tooltip shows the update")
+-- Someone behind me logs in: I answer once (unless someone else does)
+W.advance(301)
+local nV = countSent("V")
+recv("V|1|0.5.4", "Caelith-Shade")
+W.advance(31)
+check(countSent("V") == nV + 1, "answered a guildie on an old version")
+recv("V|1|0.5.4", "Thalanor-Oakheart"); W.advance(31)
+check(countSent("V") == nV + 1, "not again within 5 minutes")
+W.advance(301)
+recv("V|1|0.5.4", "Caelith-Shade"); W.advance(2)
+recv("V|1|" .. ns.VERSION, "Thalanor-Oakheart"); W.advance(31)
+check(countSent("V") == nV + 1, "someone else answered first: I stay quiet")
+
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
 local errs = {}

@@ -100,6 +100,96 @@ ns.onLogin(function()
     ns.every(0.1, Comm.Pump, "comm pump")
 end, "comm")
 
+---------------------------------------------------------------------------
+-- Update reminder. Each client says its version once after login
+-- (V|1|0.6.1). A release newer than mine (no "-test" in it), vouched for by an
+-- officer or by two guildies, gets one chat line per session and a line in
+-- the minimap button's tooltip. Someone who logs in later only hears from
+-- those who log in after them, so when a guildie announces an older version
+-- than mine, I answer after a random wait, unless another guildie with my
+-- version or newer answers first (one or two answers, not the whole guild).
+-- Old clients ignore V: unknown types are dropped.
+---------------------------------------------------------------------------
+local Version = {}
+Comm.Version = Version
+
+-- { major, minor, patch, release } from "0.6.1" or "0.6.1-test", or nil.
+function Version.Parse(v)
+    if type(v) ~= "string" then return nil end
+    local a, b, c, rest = v:match("^(%d+)%.(%d+)%.?(%d*)(.*)$")
+    if not a then return nil end
+    return { tonumber(a), tonumber(b), tonumber(c) or 0, rest == "" }
+end
+
+-- Is version a newer than b? A test build is older than the release it leads to.
+function Version.Newer(a, b)
+    local x, y = Version.Parse(a), Version.Parse(b)
+    if not x or not y then return false end
+    for i = 1, 3 do
+        if x[i] ~= y[i] then return x[i] > y[i] end
+    end
+    return x[4] and not y[4]
+end
+
+local vouch = {}               -- version -> { key = true }, newer releases only
+local newest                   -- newest release vouched for, or nil
+local told = false
+local answerAt = -1000         -- when I last answered (or saw an answer to) an old version
+local answering = false
+
+local function announce()
+    Comm.Send({ "V", Comm.PROTO, ns.VERSION }, "GUILD", nil, "version")
+end
+
+local function consider(v, key)
+    local p = Version.Parse(v)
+    if not (p and p[4] and Version.Newer(v, ns.VERSION)) then return end
+    vouch[v] = vouch[v] or {}
+    vouch[v][key] = true
+    local n = 0
+    for _ in pairs(vouch[v]) do n = n + 1 end
+    if not (n >= 2 or (ns.Roster and ns.Roster.IsOfficer(key))) then return end
+    if newest and not Version.Newer(v, newest) then return end
+    newest = v
+    if not told then
+        told = true
+        ns.print(("|cff1eff00version %s is out|r (you have %s). Update it from CurseForge when you can."):format(v, ns.VERSION))
+    end
+end
+
+local function onV(f, sender, key)
+    local v = f[3]
+    if type(v) ~= "string" or #v > 20 then return end
+    consider(v, key)
+    if not Version.Newer(v, ns.VERSION) and not Version.Newer(ns.VERSION, v) then
+        answerAt = ns.now()    -- someone with my version spoke: no need for me to
+        return
+    end
+    if Version.Newer(v, ns.VERSION) then answerAt = ns.now(); return end
+    -- They're behind me. Answer once in a while, if nobody beats me to it.
+    if answering or ns.now() - answerAt < 300 then return end
+    answering = true
+    local heardAt = answerAt
+    ns.after(5 + math.random() * 25, function()
+        answering = false
+        if answerAt ~= heardAt then return end
+        answerAt = ns.now()
+        announce()
+    end, "version answer")
+end
+
+function Version.Newest() return newest end
+
+-- "Update available: 0.6.1" for the minimap button tooltip, or nil.
+function Version.TooltipLine()
+    if newest then return ("Update available: %s (you have %s)"):format(newest, ns.VERSION) end
+end
+
+ns.onLogin(function()
+    Comm.handlers.V = onV
+    ns.after(10, announce, "version announce")
+end, "version")
+
 ns.slash.comm = { help = "message counters", fn = function()
     local s = Comm.stats
     ns.print(("sent %d, received %d, ignored (not in guild) %d, too long %d, queued %d"):format(
