@@ -238,15 +238,16 @@ recv("P|1|1440|0.9000|0.5000|3|0|33", "Caelith-Shade")   -- far away
 W.advance(0.2)
 local md, mused = ns.MapMini.Debug()
 check(mused == 1 and md[1].g.key == "thalanor oakheart" and math.abs(md[1]._point[4] - 30 * ppy) < 0.3, "minimap: near dot placed, far one hidden")
--- Minimap hover: the game rebuilds its tooltip every frame; our lines follow it
+-- Minimap hover (polling, 0.5.5): nothing of the game's under the cursor,
+-- so we show GameTooltip ourselves with the guildie under it
+GameTooltip:Hide(); GameTooltip.lines = {}
 W.cursor = { md[1]._cx + 2, md[1]._cy }
-GameTooltip.lines = {}
-Minimap_OnUpdate(Minimap)
+W.advance(0.1)
 local mtip = table.concat(GameTooltip.lines, "\n")
-check(GameTooltip:GetOwner() == UIParent and mtip:find("Thalanor Oakheart", 1, true), "minimap hover: name in the game's tooltip: " .. mtip)
+check(GameTooltip:IsShown() and GameTooltip:GetOwner() ~= UIParent and mtip:find("Thalanor Oakheart", 1, true), "minimap hover: name in our tooltip: " .. mtip)
 W.cursor = { 0, 0 }
-Minimap_OnUpdate(Minimap)
-check(#GameTooltip.lines == 0, "minimap hover: nothing under the cursor, no lines")
+W.advance(0.1)
+check(not GameTooltip:IsShown(), "minimap hover: nothing under the cursor, tooltip gone")
 ns.db.minimapDots = false
 W.advance(0.2)
 check(select(2, ns.MapMini.Debug()) == 0, "minimap dots setting")
