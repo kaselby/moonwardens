@@ -78,10 +78,10 @@ local function applyDefaults(db)
         if db[k] == nil then db[k] = v end
     end
     db.char = db.char or {}
-    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Sunday weeks
-    -- (0.6) in `weeks`; the Tuesday weeks of 0.5 in `board` are dropped.
-    -- (the Tuesday boards are carried over by Leaderboard.lua at login)
-    if not db.weeks then db.weeks = {}; db.oldBoard = db.board; db.board = nil end
+    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}, Tuesday weeks.
+    -- (0.6.0-test's Sunday weeks in db.weeks are carried back at login.)
+    db.board = db.board or {}
+    db.kills = db.kills or {}   -- my kill log: character key -> list (Leaderboard.lua)
     db.data = db.data or {}     -- research log
     db.schema = 1
 end

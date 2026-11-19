@@ -1,12 +1,13 @@
 -- Leaderboard: Horde players killed in Ashenvale and at Stonetalon Peak, per
 -- week, shared through the guild.
 -- Any kill counts, honorable or not (Krylea, 11-09): grey-level Horde too.
--- Weeks run Sunday to Sunday (Krylea, 11-15), not on the game's Tuesday reset.
--- The week ids changed with that, so the messages got new names (old clients
--- ignore them, and we ignore theirs: the two kinds of week never mix):
--- W|1|week|count            GUILD: my own count this week
--- WQ|1|week|attempt         GUILD: "send me the board"; one elected member replies
--- WS|1|week|Name:n,Name:n   WHISPER: the board, in chunks under 255 bytes
+-- Weeks run on the game's Tuesday reset, the same weeks and messages as 0.5,
+-- so every version shares one board. Sunday weeks (Krylea, 11-15) are on hold
+-- until every kill is logged with its time (Krylea, 11-19: then any rule
+-- change can be recounted exactly). The log is below: db.kills.
+-- H|1|week|count            GUILD: my own count this week
+-- HQ|1|week|attempt         GUILD: "send me the board"; one elected member replies
+-- HS|1|week|Name:n,Name:n   WHISPER: the board, in chunks under 255 bytes
 -- Counts are each player's own claim; we keep the highest we've seen.
 local _, ns = ...
 local LB = {}
@@ -16,10 +17,10 @@ local ASHENVALE = 1440
 local STONETALON = 1442
 local PEAK = "Stonetalon Peak"   -- the subzone; the rest of Stonetalon doesn't count
 local WEEK = 604800
--- A known week start: Sunday 2024-01-07 15:00 UTC (the hour of the US
--- weekly reset, moved to Sunday).
-local ANCHOR = 1704639600
-local DEBOUNCE = 30       -- seconds between my W broadcasts
+-- A known reset: Tuesday 2024-01-02 15:00 UTC (US weekly reset).
+local ANCHOR = 1704207600
+local SUNDAY_ANCHOR = 1704639600   -- 0.6.0-test's Sunday weeks (carried back once)
+local DEBOUNCE = 30       -- seconds between my H broadcasts
 local RECENT = 300        -- a member heard from within this counts as "online with the addon"
 
 local lastCounter         -- GetPVPSessionStats() kills last time we read it
@@ -30,21 +31,23 @@ local gotHS = false
 ---------------------------------------------------------------------------
 -- Weeks
 ---------------------------------------------------------------------------
--- Server time of the next reset: Sunday 15:00 UTC.
+-- Server time of the next weekly reset. Probes the client API, else assumes
+-- Tuesday 15:00 UTC. (As 0.5: the week ids must match.)
 function LB.NextReset()
     local now = ns.try(GetServerTime) or time()
+    local secs = C_DateAndTime and ns.try(C_DateAndTime.GetSecondsUntilWeeklyReset)
+    if type(secs) == "number" and secs > 0 and secs <= WEEK then return now + secs end
     return ANCHOR + (math.floor((now - ANCHOR) / WEEK) + 1) * WEEK
 end
 
--- Week id: whole weeks from the anchor to the start of this week.
+-- Week id: whole weeks from the anchor to the start of this week. Rounded, so
+-- a reset a few hours off the anchor (other regions) still gives one id.
 function LB.Week()
     return math.floor((LB.NextReset() - ANCHOR) / WEEK + 0.5) - 1
 end
 
--- The Sunday boards live in db.weeks; db.board (Tuesday weeks, 0.5.x) is
--- emptied once, since its ids mean other weeks.
 local function board()
-    return ns.db.weeks
+    return ns.db.board
 end
 
 local function weekTable(week)
@@ -108,7 +111,7 @@ local function scheduleH()
     ns.after(wait, function()
         sendPending = false
         lastH = ns.now()
-        ns.Comm.Send({ "W", ns.Comm.PROTO, LB.Week(), LB.Mine() }, "GUILD", nil, "hk")
+        ns.Comm.Send({ "H", ns.Comm.PROTO, LB.Week(), LB.Mine() }, "GUILD", nil, "hk")
     end, "hk send")
 end
 
@@ -119,30 +122,90 @@ end
 --  * GetPVPSessionStats() honorable kills. PLAYER_PVP_KILLS_CHANGED fires
 --    twice per kill, so we count the counter's rise, never the events.
 -- The same kill usually shows up in both, within a second or two. Each
--- counted kill waits up to MATCH seconds for its twin from the other source;
--- a twin that arrives is absorbed, not counted again.
+-- kill waits up to MATCH seconds for its twin from the other source; a twin
+-- that arrives is absorbed (it only adds what it knows to the log entry).
+--
+-- Every kill is logged, wherever it happened (Krylea, 11-19), so any future
+-- rule (other weeks, other zones) can be recounted exactly:
+-- db.kills[my key] = list of {
+--   t = server time, m = map id, z = zone, sz = subzone, i = 1 if in an instance,
+--   s = "p" (party kill), "h" (honour counter) or "ph" (both),
+--   k = 1 if it counted on the leaderboard,
+--   g = victim GUID, v = victim name, c = victim class (file), r = race,
+--   by = who struck it, when not me }
+-- Victim fields only come with a party kill, and only when readable.
 local MATCH = 10
-local fromParty, fromHK = {}, {}   -- times of counted kills still waiting for a twin
+local LOG_MAX = 50000              -- per character; oldest dropped beyond this
+local fromParty, fromHK = {}, {}   -- { at, e } of logged kills still waiting for a twin
 
-local function absorb(list)
+-- The oldest waiting kill from the other source that counted the same way
+-- (a kill just over a zone border must not swallow one inside it).
+local function absorb(list, counted)
     local now = ns.now()
-    while list[1] and now - list[1] > MATCH do table.remove(list, 1) end
-    if list[1] then table.remove(list, 1); return true end
-    return false
+    while list[1] and now - list[1].at > MATCH do table.remove(list, 1) end
+    for i = 1, #list do
+        if (list[i].e.k == 1) == counted then return table.remove(list, i) end
+    end
 end
 
-local function count(from, other)
-    if absorb(other) then return end
-    from[#from + 1] = ns.now()
-    LB.Add(1)
+local function str(v)
+    if type(v) == "string" and ns.readable(v) and v ~= "" then return v end
+end
+
+local function victimInfo(guid, attacker, e)
+    e.g = str(guid)
+    if e.g and GetPlayerInfoByGUID then
+        local ok, _, class, _, race, _, name, realm = pcall(GetPlayerInfoByGUID, e.g)
+        if ok then
+            e.c, e.r, e.v = str(class), str(race), str(name)
+            if e.v and str(realm) then e.v = e.v .. "-" .. realm end
+        end
+    end
+    if str(attacker) and attacker ~= ns.try(UnitGUID, "player") and GetPlayerInfoByGUID then
+        local ok, _, _, _, _, _, name = pcall(GetPlayerInfoByGUID, attacker)
+        if ok then e.by = str(name) end
+    end
+end
+
+function LB.Log()
+    if not (ns.db and ns.meKey) then return {} end
+    ns.db.kills[ns.meKey] = ns.db.kills[ns.meKey] or {}
+    return ns.db.kills[ns.meKey]
+end
+
+local function kill(src, guid, attacker)
+    local counted = counts()
+    local twin = absorb(src == "p" and fromHK or fromParty, counted)
+    if twin then
+        twin.e.s = "ph"
+        if src == "p" then victimInfo(guid, attacker, twin.e) end
+        return
+    end
+    local inside, kind = ns.try(IsInInstance)
+    local e = {
+        t = ns.try(GetServerTime) or time(),
+        m = ns.try(C_Map.GetBestMapForUnit, "player"),
+        z = str(ns.try(GetZoneText)), sz = str(ns.try(GetSubZoneText)),
+        i = (inside == true and kind ~= "none") and 1 or nil,
+        s = src,
+    }
+    if type(e.m) ~= "number" then e.m = nil end
+    if src == "p" then victimInfo(guid, attacker, e) end
+    if counted then e.k = 1 end
+    local log = LB.Log()
+    log[#log + 1] = e
+    while #log > LOG_MAX do table.remove(log, 1) end
+    local list = src == "p" and fromParty or fromHK
+    list[#list + 1] = { at = ns.now(), e = e }
+    if e.k then LB.Add(1) end
 end
 
 function LB.PartyKill(attacker, victim)
     if type(victim) ~= "string" or not ns.readable(victim) then return end
     -- Only players. In open-world Ashenvale and Stonetalon every player who
     -- can die to us is Horde (no duels to the death, no free-for-all areas).
-    if victim:sub(1, 7) ~= "Player-" or not counts() then return end
-    count(fromParty, fromHK)
+    if victim:sub(1, 7) ~= "Player-" then return end
+    kill("p", victim, attacker)
 end
 
 -- Kills on the HK counter from before login are not ours to count (we don't
@@ -153,9 +216,7 @@ function LB.Read()
     if lastCounter == nil then lastCounter = kills; return end -- baseline at login
     local d = kills >= lastCounter and kills - lastCounter or kills -- a drop = daily reset to 0
     lastCounter = kills
-    if d > 0 and counts() then
-        for _ = 1, d do count(fromHK, fromParty) end
-    end
+    for _ = 1, d do kill("h") end
 end
 
 function LB.Add(n)
@@ -197,7 +258,7 @@ function LB.Chunks(week)
         if e.c > 0 then entries[#entries + 1] = (ns.address(e.n) or key) .. ":" .. e.c end
     end
     table.sort(entries)
-    local head = ("WS|%d|%d|"):format(ns.Comm.PROTO, week)
+    local head = ("HS|%d|%d|"):format(ns.Comm.PROTO, week)
     local chunks, cur = {}, {}
     local len = #head
     for _, s in ipairs(entries) do
@@ -214,27 +275,27 @@ end
 local function reply(to, week)
     for _, w in ipairs({ week, week - 1 }) do
         for _, c in ipairs(LB.Chunks(w)) do
-            ns.Comm.Send({ "WS", ns.Comm.PROTO, w, table.concat(c, ",") }, "WHISPER", to)
+            ns.Comm.Send({ "HS", ns.Comm.PROTO, w, table.concat(c, ",") }, "WHISPER", to)
         end
     end
 end
 
 local function request(attempt)
-    ns.Comm.Send({ "WQ", ns.Comm.PROTO, LB.Week(), attempt }, "GUILD")
+    ns.Comm.Send({ "HQ", ns.Comm.PROTO, LB.Week(), attempt }, "GUILD")
 end
 
-ns.Comm.handlers.W = function(f, sender, key)
+ns.Comm.handlers.H = function(f, sender, key)
     if LB.Set(f[3], key, f[4], sender) and ns.UI then ns.UI.Refresh() end
 end
 
-ns.Comm.handlers.WQ = function(f, sender, key)
+ns.Comm.handlers.HQ = function(f, sender, key)
     local week, attempt = tonumber(f[3]), tonumber(f[4]) or 1
     if not week or week ~= LB.Week() then return end
     local who = LB.Repliers(key)[attempt]
     if who == ns.meKey then reply(ns.address(sender), week) end
 end
 
-ns.Comm.handlers.WS = function(f, sender)
+ns.Comm.handlers.HS = function(f, sender)
     gotHS = true
     local week = tonumber(f[3])
     if not week or not f[4] then return end
@@ -249,63 +310,26 @@ ns.Comm.handlers.WS = function(f, sender)
 end
 
 ---------------------------------------------------------------------------
--- 0.5.x (Tuesday weeks) during the switch. A Tuesday week's counts go to the
--- Sunday week it started in: from Tuesday to Sunday that is exact (every kill
--- since Tuesday is in this Sunday week, a little under for kills Sunday to
--- Tuesday); after Sunday they land in "last week". This carries the board
--- over on update (nobody's count drops to 0) and reads the H and HS that
--- players still on 0.5 send. 0.5 never hears from 0.6: their board shows
--- only 0.5 players until they update.
--- H|1|week|count   HQ|1|week|attempt   HS|1|week|Name:n,...   (0.5 formats)
+-- 0.6.0-test kept Sunday weeks in db.weeks (Krylea and testers only). Once:
+-- each into the Tuesday week that holds most of it (Sunday + 2 days), as a
+-- claim like any other, then dropped.
 ---------------------------------------------------------------------------
-local OLD_ANCHOR = 1704207600   -- Tuesday 2024-01-02 15:00 UTC, 0.5's anchor
-
-function LB.FromOldWeek(w)
-    w = tonumber(w)
-    if not w then return nil end
-    return math.floor((OLD_ANCHOR + w * WEEK - ANCHOR) / WEEK)
-end
-
-function LB.OldWeek()
-    local now = ns.try(GetServerTime) or time()
-    return math.floor((now - OLD_ANCHOR) / WEEK)
-end
-
--- Once, on the first login with 0.6: the 0.5 board into the Sunday weeks.
-function LB.CarryOver()
-    local old = ns.db.oldBoard
-    ns.db.oldBoard = nil
-    if type(old) ~= "table" then return 0 end
-    local n = 0
-    for w, t in pairs(old) do
-        local target = LB.FromOldWeek(w)
-        if target and type(t) == "table" then
+function LB.CarryBack()
+    local weeks = ns.db.weeks
+    ns.db.weeks, ns.db.oldBoard = nil, nil
+    if type(weeks) ~= "table" then return end
+    for w, t in pairs(weeks) do
+        w = tonumber(w)
+        if w and type(t) == "table" then
+            local target = math.floor((SUNDAY_ANCHOR + w * WEEK + 2 * 86400 - ANCHOR) / WEEK)
             for key, e in pairs(t) do
                 if type(e) == "table" and LB.Set(target, key, e.c, e.n) then
                     local mine = weekTable(target)[key]
                     if mine and not mine.cls then mine.cls = e.cls end
-                    n = n + 1
                 end
             end
         end
     end
-    return n
-end
-
-ns.Comm.handlers.H = function(f, sender, key)
-    if LB.Set(LB.FromOldWeek(f[3]), key, f[4], sender) and ns.UI then ns.UI.Refresh() end
-end
-
-ns.Comm.handlers.HS = function(f, sender)
-    local week = LB.FromOldWeek(f[3])
-    if not week or not f[4] then return end
-    local changed = false
-    for item in f[4]:gmatch("[^,]+") do
-        local name, n = item:match("^(.-):(%d+)$")
-        local key = ns.key(name)
-        if key and key ~= ns.meKey and LB.Set(week, key, n, name) then changed = true end
-    end
-    if changed and ns.UI then ns.UI.Refresh() end
 end
 
 ---------------------------------------------------------------------------
@@ -400,7 +424,7 @@ local function refresh(f)
     local resetAt = LB.NextReset()
     local left = resetAt - (ns.try(GetServerTime) or time())
     if f.week == 0 then
-        f.sub:SetText(("Ashenvale and Stonetalon Peak  -  resets Sunday  -  %s left  -  guild total |cffffd100%d|r"):format(
+        f.sub:SetText(("Ashenvale and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
             duration(left), total))
     else
         f.sub:SetText(("Final standings  -  guild total |cffffd100%d|r"):format(total))
@@ -432,7 +456,7 @@ local function refresh(f)
     else
         f.empty:Hide()
     end
-    local foot = "Counts Horde killed in Ashenvale or at Stonetalon Peak by you or your group, honour or not. Weeks run Sunday to Sunday. Only members with the addon appear."
+    local foot = "Counts Horde killed in Ashenvale or at Stonetalon Peak by you or your group, honour or not. Weeks run from the Tuesday reset. Only members with the addon appear."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
@@ -451,7 +475,7 @@ ns.UI.AddPage(5, "Leaderboard", build, refresh)
 -- Startup
 ---------------------------------------------------------------------------
 ns.onLogin(function()
-    LB.CarryOver()
+    LB.CarryBack()
     prune()
     LB.Read() -- sets the baseline; kills from before login don't count
     ns:On("PLAYER_PVP_KILLS_CHANGED", LB.Read)
@@ -461,12 +485,22 @@ ns.onLogin(function()
     ns.after(15, function()
         if LB.Mine() > 0 then scheduleH() end
         request(1)
-        -- Ask 0.5 players for their board too (they answer in HS; see above).
-        ns.Comm.Send({ "HQ", ns.Comm.PROTO, LB.OldWeek(), 1 }, "GUILD")
         ns.after(20, function() if not gotHS then request(2) end end, "hk retry")
     end, "hk login")
 end, "leaderboard")
 
 ns.slash.hk = { help = "my Horde kills this week (Ashenvale and Stonetalon Peak)", fn = function()
     ns.print(("%d Horde kills this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
+end }
+
+-- /mw kills: the last few entries of my kill log, to check it's recording.
+ns.slash.kills = { help = "my last kills from the kill log", fn = function()
+    local log = LB.Log()
+    ns.print(("%d kills logged on this character."):format(#log))
+    for i = math.max(1, #log - 4), #log do
+        local e = log[i]
+        local who = e.v or (e.g and "a player") or "unknown"
+        ns.print(("  %s  %s%s  %s%s%s"):format(date("%m-%d %H:%M", e.t), e.z or "?", e.sz and (" / " .. e.sz) or "",
+            who, e.c and (" (" .. e.c .. ")") or "", e.k and "" or "  [not counted]"))
+    end
 end }

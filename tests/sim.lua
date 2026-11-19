@@ -474,20 +474,20 @@ check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Res
 ---------------------------------------------------------------------------
 local LB = ns.Leaderboard
 local WEEK = 604800
--- Week id: Sunday 15:00 UTC, whatever the game's own reset says
+-- Week id: fallback (Tuesday 15:00 UTC), and the client API agreeing with it
 local nr = LB.NextReset()
 local left = nr - GetServerTime()
-check(left > 0 and left <= WEEK and (nr - 1704639600) % WEEK == 0, "reset on the Sunday grid")
-check(os.date("!%A %H:%M", nr) == "Sunday 15:00", "reset is Sunday 15:00 UTC: " .. os.date("!%A %H:%M", nr))
+check(left > 0 and left <= WEEK and (nr - 1704207600) % WEEK == 0, "fallback reset on the Tuesday grid")
+check(os.date("!%A %H:%M", nr) == "Tuesday 15:00", "reset is Tuesday 15:00 UTC: " .. os.date("!%A %H:%M", nr))
 local wk = LB.Week()
-W.untilReset = left + 2 * 86400   -- the game's Tuesday reset: ignored now
-check(LB.Week() == wk and LB.NextReset() == nr, "game's weekly reset ignored")
+W.untilReset = left + 3 * 3600   -- a region resetting 3 h later
+check(LB.Week() == wk and LB.NextReset() == nr + 3 * 3600, "client reset API used, same week id")
 W.untilReset = nil
 -- Login HQ went out, and the retry (nobody answered)
 local hq1, hq2 = false, false
 for _, m in ipairs(W.sent) do
-    if m.m == "WQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
-    if m.m == "WQ|1|" .. wk .. "|2" then hq2 = true end
+    if m.m == "HQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
+    if m.m == "HQ|1|" .. wk .. "|2" then hq2 = true end
 end
 check(hq1 and hq2, "HQ on login, retry when no HS")
 -- Counting
@@ -510,46 +510,46 @@ W.map = 1440; W.hk = 0; W.advance(6); W.hk = 2; W.fire("PLAYER_PVP_KILLS_CHANGED
 check(LB.Mine() == 5, "counter reset (new day) handled")
 W.instance = true; W.hk = 3; W.advance(6); W.instance = false
 check(LB.Mine() == 5, "kill in an instance (Warsong) not counted")
-local nH = countSent("W")
+local nH = countSent("H")
 W.advance(31)
-check(countSent("W") == nH + 1 and lastSent("W").m == "W|1|" .. wk .. "|5", "one debounced W: " .. tostring(lastSent("W") and lastSent("W").m))
+check(countSent("H") == nH + 1 and lastSent("H").m == "H|1|" .. wk .. "|5", "one debounced H: " .. tostring(lastSent("H") and lastSent("H").m))
 W.hk = 4; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
 W.hk = 5; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
-check(countSent("W") == nH + 1, "no second H within 30 s")
+check(countSent("H") == nH + 1, "no second H within 30 s")
 W.advance(25)
-check(countSent("W") == nH + 2 and lastSent("W").m == "W|1|" .. wk .. "|7", "then one W with the latest count")
+check(countSent("H") == nH + 2 and lastSent("H").m == "H|1|" .. wk .. "|7", "then one H with the latest count")
 -- Receiving H
-recv("W|1|" .. wk .. "|50", "Thalanor-Oakheart")
-recv("W|1|" .. wk .. "|40", "Thalanor-Oakheart")
-recv("W|1|" .. wk .. "|99", "Random-Stranger")
-recv("W|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
+recv("H|1|" .. wk .. "|50", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|40", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|99", "Random-Stranger")
+recv("H|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
 local rows = LB.Rows(wk)
 check(#rows == 2 and rows[1].name == "Thalanor Oakheart" and rows[1].c == 50 and rows[1].level == 60
     and rows[2].key == "sanalune silverwind", "H stored as max, stranger and far week ignored")
 -- Sync: Caelith (online, just heard) is lowest, so she answers attempt 1; I answer attempt 2
-recv("W|1|" .. wk .. "|5", "Caelith-Shade")
+recv("H|1|" .. wk .. "|5", "Caelith-Shade")
 check(LB.Repliers("thalanor oakheart")[1] == "caelith shade", "elected replier: lowest recent name")
-local nHS = countSent("WS")
-recv("WQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
+local nHS = countSent("HS")
+recv("HQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
 W.advance(1)
-check(countSent("WS") == nHS, "not elected: no reply")
-recv("WQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
+check(countSent("HS") == nHS, "not elected: no reply")
+recv("HQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
 W.advance(1)
-local hs = lastSent("WS")
+local hs = lastSent("HS")
 check(hs and hs.ch == "WHISPER" and hs.to == "Thalanor-Oakheart" and hs.m:find("Thalanor-Oakheart:50", 1, true)
     and hs.m:find("Sanalune-Silverwind:7", 1, true) and hs.m:find("Caelith-Shade:5", 1, true), "HS reply: " .. tostring(hs and hs.m))
-W.fire("CHAT_MSG_ADDON", "MWG1", "WS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
+W.fire("CHAT_MSG_ADDON", "MWG1", "HS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
 rows = LB.Rows(wk)
 check(#rows == 4 and LB.Mine() == 7, "HS merged; my own count not overwritten; stranger not shown")
 -- Chunks stay under 255 bytes and carry everyone
 local big = {}
 for i = 1, 40 do big["member" .. i .. " longsurname"] = { n = ("Member%d Longsurname"):format(i), c = i } end
-ns.db.weeks[wk - 1] = big
+ns.db.board[wk - 1] = big
 local chunks, total = LB.Chunks(wk - 1), 0
 local okLen = true
 for _, c in ipairs(chunks) do
     total = total + #c
-    if #table.concat({ "WS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
+    if #table.concat({ "HS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
 end
 check(#chunks >= 4 and total == 40 and okLen, "chunks: " .. #chunks .. " messages, " .. total .. " entries")
 -- Any kill, not just honorable: PARTY_KILL, matched against the HK counter
@@ -570,14 +570,14 @@ check(LB.Mine() == base + 3, "NPCs and other zones not counted")
 W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
 check(LB.Mine() == base + 4, "HK alone still counts (party kill secret or missed)")
 W.advance(11)
-for k, e in pairs(ns.db.weeks[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
+for k, e in pairs(ns.db.board[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
 -- Page
-ns.db.weeks[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
-ns.db.weeks[wk - 6] = { x = { n = "X", c = 1 } }
+ns.db.board[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
+ns.db.board[wk - 6] = { x = { n = "X", c = 1 } }
 ns.ToggleWindow(5)
 local pg = LB.page
 check(MoonwardensFrame.current == 5 and pg and pg:IsShown(), "leaderboard page opens")
-check(ns.db.weeks[wk - 6] == nil, "old weeks pruned")
+check(ns.db.board[wk - 6] == nil, "old weeks pruned")
 check(pg.rows[1].name:GetText() == "Thalanor Oakheart" and pg.rows[1].n:GetText() == 50
     and pg.rows[1].class:GetText() == "60 Warrior", "row 1")
 local mine
@@ -593,33 +593,47 @@ check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
 
 ---------------------------------------------------------------------------
--- Switch from 0.5 (Tuesday weeks): the board carries over, old H/HS read
+-- 0.6.0-test's Sunday weeks carried back into Tuesday weeks; the kill log
 ---------------------------------------------------------------------------
 do
     local LBo = ns.Leaderboard
-    local ow, cw = LBo.OldWeek(), LBo.Week()
-    local now = GetServerTime()
-    local oldStart = 1704207600 + ow * 604800
-    local sunStart = 1704639600 + cw * 604800
-    check(oldStart <= now and oldStart - sunStart == 2 * 86400, "this Tuesday week starts 2 days into this Sunday week")
-    check(LBo.FromOldWeek(ow) == cw and LBo.FromOldWeek(ow - 1) == cw - 1, "Tuesday week -> the Sunday week it started in")
+    local cw = LBo.Week()
+    -- The Sunday week that starts 2 days before this Tuesday week
+    local sunWeek = math.floor((1704207600 + cw * 604800 - 2 * 86400 - 1704639600) / 604800 + 0.5)
+    check(1704639600 + sunWeek * 604800 + 2 * 86400 == 1704207600 + cw * 604800, "Sunday week id found")
     local myBefore = LBo.Mine()
-    ns.db.oldBoard = {
-        [ow] = { ["sanalune silverwind"] = { n = "Sanalune Silverwind", c = myBefore + 40, cls = "DRUID" },
-                 ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 12, cls = "PRIEST" } },
-        [ow - 1] = { ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 30, cls = "PRIEST" } },
-        [ow - 9] = { ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 99 } },
-    }
-    LBo.CarryOver()
-    check(LBo.Mine() == myBefore + 40, "my own count survives the update")
-    local cur = ns.db.weeks[cw]
-    check(cur["velanya dawnleaf"] and cur["velanya dawnleaf"].c == 12 and cur["velanya dawnleaf"].cls == "PRIEST", "guildies' counts carried over")
-    check(ns.db.weeks[cw - 1]["velanya dawnleaf"].c == 30 and not ns.db.weeks[cw - 9], "last week carried, old weeks dropped")
-    check(ns.db.oldBoard == nil, "carried over once")
-    recv(("H|1|%d|17"):format(ow), "Caelith-Shade")
-    check(ns.db.weeks[cw]["caelith shade"].c == 17, "an H from a 0.5 player lands on this week")
-    recv(("HS|1|%d|Thalanor Oakheart:250,Sanalune Silverwind:1"):format(ow), "Caelith-Shade")
-    check(ns.db.weeks[cw]["thalanor oakheart"].c == 250 and LBo.Mine() == myBefore + 40, "HS from 0.5 read; my own count not lowered")
+    ns.db.weeks = { [sunWeek] = { ["sanalune silverwind"] = { n = "Sanalune Silverwind", c = myBefore + 90, cls = "DRUID" },
+                                  ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 3, cls = "PRIEST" } } }
+    LBo.CarryBack()
+    check(LBo.Mine() == myBefore + 90 and ns.db.board[cw]["velanya dawnleaf"].c >= 3, "Sunday counts carried back to this Tuesday week")
+    check(ns.db.weeks == nil, "carried back once")
+
+    -- Kill log: every kill, wherever it happened, with its time
+    local log = LBo.Log()
+    local n0 = #log
+    W.advance(11)
+    W.map, W.subzone = 1439, ""
+    W.hk = (W.hk or 0) + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    local e = log[#log]
+    check(#log == n0 + 1 and e.m == 1439 and e.z == "Darkshore" and e.s == "h" and not e.k and e.t == GetServerTime(),
+        "kill in Darkshore logged (not counted), with its time")
+    W.map = 1440
+    local mineNow = LBo.Mine()
+    W.advance(11)
+    LBo.PartyKill("Player-1-01", "Player-0-7062-ABCD")
+    W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    e = log[#log]
+    check(#log == n0 + 2 and e.s == "ph" and e.k == 1 and e.g == "Player-0-7062-ABCD" and LBo.Mine() == mineNow + 1,
+        "party kill + honour counter: one entry, both sources, counted once")
+    W.advance(11)
+    W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    LBo.PartyKill("Player-1-02", "Player-0-7062-EF01")
+    e = log[#log]
+    check(#log == n0 + 3 and e.s == "ph" and e.g == "Player-0-7062-EF01", "twin the other way round fills in the victim")
+    W.advance(11)
+    check(ns.db.kills[ns.meKey] == log, "log saved per character")
+    SlashCmdList.MOONWARDENS("kills")
+    check(W.prints[#W.prints]:find("Ashenvale", 1, true) and table.concat(W.prints, "\n", #W.prints - 5):find("kills logged", 1, true), "/mw kills: " .. W.prints[#W.prints])
 end
 
 ---------------------------------------------------------------------------
