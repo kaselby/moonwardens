@@ -249,6 +249,66 @@ ns.Comm.handlers.WS = function(f, sender)
 end
 
 ---------------------------------------------------------------------------
+-- 0.5.x (Tuesday weeks) during the switch. A Tuesday week's counts go to the
+-- Sunday week it started in: from Tuesday to Sunday that is exact (every kill
+-- since Tuesday is in this Sunday week, a little under for kills Sunday to
+-- Tuesday); after Sunday they land in "last week". This carries the board
+-- over on update (nobody's count drops to 0) and reads the H and HS that
+-- players still on 0.5 send. 0.5 never hears from 0.6: their board shows
+-- only 0.5 players until they update.
+-- H|1|week|count   HQ|1|week|attempt   HS|1|week|Name:n,...   (0.5 formats)
+---------------------------------------------------------------------------
+local OLD_ANCHOR = 1704207600   -- Tuesday 2024-01-02 15:00 UTC, 0.5's anchor
+
+function LB.FromOldWeek(w)
+    w = tonumber(w)
+    if not w then return nil end
+    return math.floor((OLD_ANCHOR + w * WEEK - ANCHOR) / WEEK)
+end
+
+function LB.OldWeek()
+    local now = ns.try(GetServerTime) or time()
+    return math.floor((now - OLD_ANCHOR) / WEEK)
+end
+
+-- Once, on the first login with 0.6: the 0.5 board into the Sunday weeks.
+function LB.CarryOver()
+    local old = ns.db.oldBoard
+    ns.db.oldBoard = nil
+    if type(old) ~= "table" then return 0 end
+    local n = 0
+    for w, t in pairs(old) do
+        local target = LB.FromOldWeek(w)
+        if target and type(t) == "table" then
+            for key, e in pairs(t) do
+                if type(e) == "table" and LB.Set(target, key, e.c, e.n) then
+                    local mine = weekTable(target)[key]
+                    if mine and not mine.cls then mine.cls = e.cls end
+                    n = n + 1
+                end
+            end
+        end
+    end
+    return n
+end
+
+ns.Comm.handlers.H = function(f, sender, key)
+    if LB.Set(LB.FromOldWeek(f[3]), key, f[4], sender) and ns.UI then ns.UI.Refresh() end
+end
+
+ns.Comm.handlers.HS = function(f, sender)
+    local week = LB.FromOldWeek(f[3])
+    if not week or not f[4] then return end
+    local changed = false
+    for item in f[4]:gmatch("[^,]+") do
+        local name, n = item:match("^(.-):(%d+)$")
+        local key = ns.key(name)
+        if key and key ~= ns.meKey and LB.Set(week, key, n, name) then changed = true end
+    end
+    if changed and ns.UI then ns.UI.Refresh() end
+end
+
+---------------------------------------------------------------------------
 -- Page
 ---------------------------------------------------------------------------
 local ROWS = 14
@@ -391,6 +451,7 @@ ns.UI.AddPage(5, "Leaderboard", build, refresh)
 -- Startup
 ---------------------------------------------------------------------------
 ns.onLogin(function()
+    LB.CarryOver()
     prune()
     LB.Read() -- sets the baseline; kills from before login don't count
     ns:On("PLAYER_PVP_KILLS_CHANGED", LB.Read)
@@ -400,6 +461,8 @@ ns.onLogin(function()
     ns.after(15, function()
         if LB.Mine() > 0 then scheduleH() end
         request(1)
+        -- Ask 0.5 players for their board too (they answer in HS; see above).
+        ns.Comm.Send({ "HQ", ns.Comm.PROTO, LB.OldWeek(), 1 }, "GUILD")
         ns.after(20, function() if not gotHS then request(2) end end, "hk retry")
     end, "hk login")
 end, "leaderboard")

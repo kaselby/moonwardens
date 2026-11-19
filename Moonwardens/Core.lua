@@ -80,7 +80,8 @@ local function applyDefaults(db)
     db.char = db.char or {}
     -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Sunday weeks
     -- (0.6) in `weeks`; the Tuesday weeks of 0.5 in `board` are dropped.
-    if not db.weeks then db.weeks = {}; db.board = nil end
+    -- (the Tuesday boards are carried over by Leaderboard.lua at login)
+    if not db.weeks then db.weeks = {}; db.oldBoard = db.board; db.board = nil end
     db.data = db.data or {}     -- research log
     db.schema = 1
 end

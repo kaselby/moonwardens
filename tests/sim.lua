@@ -593,6 +593,36 @@ check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
 
 ---------------------------------------------------------------------------
+-- Switch from 0.5 (Tuesday weeks): the board carries over, old H/HS read
+---------------------------------------------------------------------------
+do
+    local LBo = ns.Leaderboard
+    local ow, cw = LBo.OldWeek(), LBo.Week()
+    local now = GetServerTime()
+    local oldStart = 1704207600 + ow * 604800
+    local sunStart = 1704639600 + cw * 604800
+    check(oldStart <= now and oldStart - sunStart == 2 * 86400, "this Tuesday week starts 2 days into this Sunday week")
+    check(LBo.FromOldWeek(ow) == cw and LBo.FromOldWeek(ow - 1) == cw - 1, "Tuesday week -> the Sunday week it started in")
+    local myBefore = LBo.Mine()
+    ns.db.oldBoard = {
+        [ow] = { ["sanalune silverwind"] = { n = "Sanalune Silverwind", c = myBefore + 40, cls = "DRUID" },
+                 ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 12, cls = "PRIEST" } },
+        [ow - 1] = { ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 30, cls = "PRIEST" } },
+        [ow - 9] = { ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 99 } },
+    }
+    LBo.CarryOver()
+    check(LBo.Mine() == myBefore + 40, "my own count survives the update")
+    local cur = ns.db.weeks[cw]
+    check(cur["velanya dawnleaf"] and cur["velanya dawnleaf"].c == 12 and cur["velanya dawnleaf"].cls == "PRIEST", "guildies' counts carried over")
+    check(ns.db.weeks[cw - 1]["velanya dawnleaf"].c == 30 and not ns.db.weeks[cw - 9], "last week carried, old weeks dropped")
+    check(ns.db.oldBoard == nil, "carried over once")
+    recv(("H|1|%d|17"):format(ow), "Caelith-Shade")
+    check(ns.db.weeks[cw]["caelith shade"].c == 17, "an H from a 0.5 player lands on this week")
+    recv(("HS|1|%d|Thalanor Oakheart:250,Sanalune Silverwind:1"):format(ow), "Caelith-Shade")
+    check(ns.db.weeks[cw]["thalanor oakheart"].c == 250 and LBo.Mine() == myBefore + 40, "HS from 0.5 read; my own count not lowered")
+end
+
+---------------------------------------------------------------------------
 -- Update reminder (V messages)
 ---------------------------------------------------------------------------
 local Ver = ns.Comm.Version
