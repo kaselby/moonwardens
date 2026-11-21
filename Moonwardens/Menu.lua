@@ -1,5 +1,6 @@
 -- Menu: a "Moonwardens" section at the bottom of the game's right-click menu
--- for a guildie's name, in chat and in the guild roster, with View Badges.
+-- for a guildie, with View Badges: their name in chat and in the guild
+-- roster, and their unit frames - target, focus, party and raid.
 -- Menu.ModifyMenu appends to the game's own menu (its tag is MENU_UNIT_ and
 -- the menu's kind); nothing of the game's is rebuilt or moved.
 local _, ns = ...
@@ -11,18 +12,42 @@ local TAGS = {
     "MENU_UNIT_COMMUNITIES_WOW_MEMBER",
     "MENU_UNIT_GUILD",                     -- (older guild list)
     "MENU_UNIT_GUILD_OFFLINE",
+    -- Unit frames: the game picks the menu by who it is (in my party or
+    -- raid, or not) and which frame.
+    "MENU_UNIT_PLAYER",                    -- target / focus, not in my group
+    "MENU_UNIT_TARGET",
+    "MENU_UNIT_FOCUS",
+    "MENU_UNIT_PARTY",                     -- party frames, or a party member targeted
+    "MENU_UNIT_RAID_PLAYER",               -- a raid member targeted
+    "MENU_UNIT_RAID",                      -- raid frames
 }
 
+-- The guildie a menu is for: from its unit (a unit frame: the full name,
+-- "First Last"), else its name (and server, which on Forever is the last
+-- name). Nil for anyone not in the guild, and for me.
 local function guildieOf(contextData)
-    if type(contextData) ~= "table" then return nil end
-    local name = contextData.name
-    if type(name) ~= "string" or not ns.readable(name) then
-        local unit = contextData.unit
-        if type(unit) == "string" then name = ns.try(GetUnitName, unit, true) end
+    if type(contextData) ~= "table" or not ns.Roster then return nil end
+    local tries = {}
+    local unit = contextData.unit
+    if type(unit) == "string" then
+        if ns.try(UnitIsPlayer, unit) ~= true then return nil end
+        tries[#tries + 1] = ns.try(GetUnitName, unit, true)
+        local first, last = ns.try(UnitName, unit)
+        if type(first) == "string" and type(last) == "string" and last ~= "" then tries[#tries + 1] = first .. " " .. last end
     end
-    local key = ns.key(name)
-    if not key or not (ns.Roster and ns.Roster.Get(key)) then return nil end
-    return key
+    local name, server = contextData.name, contextData.server
+    if type(name) == "string" and ns.readable(name) then
+        if type(server) == "string" and ns.readable(server) and server ~= "" then tries[#tries + 1] = name .. " " .. server end
+        tries[#tries + 1] = name
+    end
+    for _, n in ipairs(tries) do
+        local key = type(n) == "string" and ns.key(n)
+        if key and ns.Roster.Get(key) then
+            if key == ns.meKey and type(unit) == "string" then return nil end   -- (my own frame: not a fellow Moonwarden)
+            return key
+        end
+    end
+    return nil
 end
 
 local function addSection(owner, root, contextData)

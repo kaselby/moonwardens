@@ -293,6 +293,9 @@ function Ledger.CheckClaims()
     for _, b in ipairs(ns.Badges.LIST) do
         if b.kind ~= "manual" and b.kind ~= "manualweekly" and b.kind ~= "granted" and b.kind ~= "placement" then
             local e = r.badges[b.id]
+            -- (claimed more than it now counts - weekly tiers used to count
+            -- again within a week: claims follow the real count from here)
+            if e.times < (done[b.id] or 0) then done[b.id] = e.times end
             if e.times > (done[b.id] or 0) then
                 -- (what it was earned on: kills, or for the captures series, captures)
                 local value = r.lifetime

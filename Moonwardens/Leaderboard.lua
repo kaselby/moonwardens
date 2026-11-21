@@ -272,7 +272,7 @@ local function build(f)
     f.week = 0 -- 0 = this week, 1 = last week
     f.title = UI.Text(f, "big", UI.GOLD, "LEFT"); f.title:SetPoint("TOPLEFT", 0, 0)
     if ns.BadgesUI then ns.BadgesUI.Kit.bump(f.title) end
-    f.title:SetText("Horde Kills in Ashenvale")
+    f.title:SetText("Horde Kills in Ashenvale Leaderboard")
     f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -22)
 
     f.tabs = {}

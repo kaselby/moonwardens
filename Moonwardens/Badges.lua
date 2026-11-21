@@ -4,8 +4,9 @@
 -- Badges are worked out from kill counts, per week (the Leaderboard's weeks):
 -- a weekly badge from that week's count, a lifetime one from the sum of all
 -- weeks. Earned badges stay earned; only a week's progress starts again.
--- Weekly tiers come round in sets: every 500 kills in a week is one Copper,
--- one Silver and one Gold; 550 is one of each and 50 into the next Copper.
+-- A weekly tier is earned at most once a week (the Leaderboard's week, to
+-- its reset): reaching it again that week counts nothing; next week it
+-- can be earned again. A lifetime tier is earned once, ever.
 --
 -- My weeks are kept in db.badgeWeeks for good (the Leaderboard keeps two).
 -- Another guildie's come by whisper when their badges are viewed:
@@ -348,12 +349,9 @@ function Badges.Resolve(e)
     return e.badge
 end
 
-local SET = 500   -- a full weekly set: the Gold goal
-
--- Moonstone for the kills (past Gold, and not part of the 500 sets: 1,000
--- in one week; 100,000 in all).
+-- Moonstone for the kills (past Gold: 1,000 in one week; 100,000 in all).
 Badges.LIST[#Badges.LIST + 1] = { id = "wk4", cat = "kills", kind = "weekly", tier = "moonstone", goal = 1000, points = 50,
-    noCycle = true, name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
+    name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
     desc = "Kill or assist in killing 1,000 Horde in Ashenvale in a week." }
 Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kills", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
     name = "Lifetime Wrath of the Kaldorei", icon = LIFETIME_ICON,
@@ -493,11 +491,6 @@ end
 ---------------------------------------------------------------------------
 -- Working out what's earned
 ---------------------------------------------------------------------------
--- How many of a weekly tier a week's count gives.
-local function weeklyTimes(b, c)
-    local sets = math.floor(c / SET)
-    return sets + ((c % SET) >= b.goal and 1 or 0)
-end
 
 -- A guildie's badges from their weeks ({ [week] = count }) and what officers
 -- gave them (`manual`, Ledger.ManualFor: progress toward the badges officers
@@ -524,8 +517,8 @@ function Badges.Compute(weeks, manual, key)
         for _, b in ipairs(Badges.LIST) do
             local e = out[b.id]
             if b.kind == "weekly" then
-                local t = b.noCycle and (c >= b.goal and 1 or 0) or weeklyTimes(b, c)
-                if t > 0 then e.times = e.times + t; e.last = w end
+                -- (once a week at most: past the goal that week counts nothing more)
+                if c >= b.goal then e.times = e.times + 1; e.last = w end
             elseif b.kind == "lifetime" and before < b.goal and lifetime >= b.goal then
                 e.times, e.last = 1, w
             end
@@ -535,8 +528,8 @@ function Badges.Compute(weeks, manual, key)
     for _, b in ipairs(Badges.LIST) do
         local e = out[b.id]
         if b.kind == "weekly" then
-            -- (this week's run toward the next one; Moonstone isn't in the sets: the week's whole count)
-            e.value = b.noCycle and math.min(now, b.goal) or math.min(now % SET, b.goal)
+            -- (this week's count toward it; reached, it stays full until the reset)
+            e.value = math.min(now, b.goal)
         elseif b.kind == "manual" then
             local c = Badges.CounterOf(b)
             local p = math.max(0, manual.progress[c] or 0)
