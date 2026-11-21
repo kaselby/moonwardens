@@ -139,22 +139,24 @@ end
 -- PLACEHOLDER names and numbers.
 -- (`what`: "X" names them "Weekly X" and "Lifetime X"; or their own
 -- names, { weekly, lifetime }, either nil for the usual.
+-- `icon`: one list for both, or { weekly = list, lifetime = list }.
 -- `descW` / `descL`: own wording, given the count; else the usual)
 local function objectiveSet(cat, series, idW, idL, what, plural, icon, weekly, lifetime, descW, descL)
     local own = type(what) == "table" and what or {}
     local base = type(what) == "string" and what or ""
     local nameW, nameL = own[1] or ("Weekly " .. base), own[2] or ("Lifetime " .. base)
+    local iconW, iconL = icon.weekly or icon, icon.lifetime or icon
     for i, t in ipairs(weekly) do
         Badges.LIST[#Badges.LIST + 1] = {
             id = idW .. i, cat = cat, kind = "selfweekly", series = series, tier = t[1], goal = t[2], points = t[3],
-            name = nameW, icon = icon, unit = plural,
+            name = nameW, icon = iconW, unit = plural,
             desc = descW and descW(t[2]) or ("Be inside %d %s as they're taken for the Alliance, in one week."):format(t[2], plural),
         }
     end
     for i, t in ipairs(lifetime) do
         Badges.LIST[#Badges.LIST + 1] = {
             id = idL .. i, cat = cat, kind = "selflifetime", series = series, tier = t[1], goal = t[2], points = t[3],
-            name = nameL, icon = icon, unit = plural,
+            name = nameL, icon = iconL, unit = plural,
             desc = descL and descL(t[2]) or ("Be inside %d %s as they're taken for the Alliance."):format(t[2], plural),
         }
     end
@@ -194,13 +196,17 @@ local function siteLifetime(series, idL, name, site, icon)
     end
 end
 siteLifetime("shobekaran", "bk", "Bankai!", "Shobek'Aran",
-    { "inv_sword_1h_pandariaquest_b_01", "inv_sword_1h_pvppandarias1_c_01", "INV_Sword_36", "INV_Sword_19", "Achievement_Zone_Ashenvale_01" })   -- (a katana)
+    { "inv_sword_1h_katana_b_03", "inv_sword_1h_pandariaquest_b_01", "inv_sword_1h_pvppandarias1_c_01", "INV_Sword_36", "INV_Sword_19", "Achievement_Zone_Ashenvale_01" })   -- (a katana)
 siteLifetime("lesi_cave", "lc", "War-Den", "Lesi's Bear Cave",
     { "Ability_Druid_ChallangingRoar", "Ability_Racial_BearForm", "Achievement_Zone_Ashenvale_01" })
 -- Overlord: guild outposts and forts on any map.
-objectiveSet("outposts", "outposts", "uw", "ul", "Outpost Capture", "guild outposts", { "Achievement_BG_captureflag_AB", "INV_BannerPVP_02" },
+objectiveSet("outposts", "outposts", "uw", "ul", "Outpost Capture", "guild outposts",
+    { weekly = { "Achievement_BG_captureflag_AB", "INV_BannerPVP_02" },
+      lifetime = { "spell_holy_elunesgrace", "Achievement_BG_captureflag_AB" } },
     OUTPOST_WEEKLY, OUTPOST_LIFETIME)
-objectiveSet("forts", "forts", "fw", "fl", { "Weekly Fort Capture", "Ancient of War" }, "forts", { "Achievement_BG_DefendXbases_AB", "INV_Misc_Tournaments_banner_Nightelf" },
+objectiveSet("forts", "forts", "fw", "fl", { "Weekly Fort Capture", "Ancient of War" }, "forts",
+    { weekly = { "Achievement_BG_DefendXbases_AB", "INV_Misc_Tournaments_banner_Nightelf" },
+      lifetime = { "inv_misc_tournaments_symbol_nightelf", "INV_Misc_Tournaments_banner_Nightelf" } },
     { { "copper", 1, 10 }, { "silver", 2, 20 }, { "gold", 3, 40 }, { "moonstone", 6, 80 } },
     { { "copper", 5, 50 }, { "silver", 15, 100 }, { "gold", 40, 200 }, { "moonstone", 80, 400 } })
 -- Leaderboard ("placement"): 1st, 2nd or 3rd on a week's final Horde kills

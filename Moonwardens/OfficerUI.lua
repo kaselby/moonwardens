@@ -20,7 +20,9 @@ local NAV = {
     { id = "approvals", name = "Approvals" },
 }
 
-local state = { view = "award", who = nil, badge = nil, filter = "" }
+-- (Award Progress: `section` a subsection's id, `entry` a badge in it - a
+-- tier track's id, or a badge's - and `badge` the badge itself, its tier)
+local state = { view = "award", who = nil, section = nil, entry = nil, badge = nil, filter = "" }
 local page
 
 local function classHex(key)
@@ -90,10 +92,87 @@ local function badgeLabel(b)
     return Badges.Coin(b) .. Badges.Title(b)
 end
 
+-- What can be awarded in a subsection: one entry per badge, a tier track
+-- as one ({ id, name, icon, tiers } - its tiers are picked under Progress),
+-- else { id, name, icon, badge }. Only what I may award, and nothing
+-- switched off or from past months.
+local function entriesOf(cat)
+    local out, byTrack = {}, {}
+    for _, b in ipairs(Badges.Grantable(cat)) do
+        local past = (b.parent and b.month ~= Badges.BOUNTY.month) or Badges.CategorySoon(b.cat)
+        if not past and ns.Ledger.CanAward(nil, b.id) then
+            if b.track then
+                local en = byTrack[b.track]
+                if not en then
+                    en = { id = b.track, name = Badges.Title(b), icon = b.icon, tiers = {} }
+                    byTrack[b.track] = en
+                    out[#out + 1] = en
+                end
+                en.tiers[#en.tiers + 1] = b
+            else
+                out[#out + 1] = { id = b.id, name = Badges.Title(b), icon = b.icon, badge = b }
+            end
+        end
+    end
+    for _, en in ipairs(out) do
+        if en.tiers then table.sort(en.tiers, function(x, y) return Badges.TIER_ORDER[x.tier] < Badges.TIER_ORDER[y.tier] end) end
+    end
+    return out
+end
+
+local function sectionLabel(id)
+    for _, top in ipairs(Badges.CATEGORIES) do
+        for _, c in ipairs(top.children or {}) do
+            if c.id == id then return top.name .. " > " .. c.name end
+        end
+    end
+end
+
+local function currentEntry()
+    if not (state.section and state.entry) then return nil end
+    for _, en in ipairs(entriesOf(state.section)) do if en.id == state.entry then return en end end
+end
+
+local function iconText(icon, size)
+    local n = type(icon) == "table" and icon[1] or icon
+    return n and ("|TInterface\\Icons\\%s:%d:%d|t "):format(n, size or 16, size or 16) or ""
+end
+
+-- A menu entry's tooltip: a title, then lines.
+local function menuTip(desc, title, lines)
+    if not (desc and desc.SetTooltip) then return end
+    pcall(desc.SetTooltip, desc, function(tt)
+        tt:SetText(title, 1, 0.82, 0)
+        for _, l in ipairs(lines) do tt:AddLine(l, 1, 1, 1, true) end
+    end)
+end
+
+local function pickSection(id)
+    state.section, state.entry, state.badge = id, nil, nil
+    OUI.Refresh()
+end
+
+-- A badge picked: itself; a track: the tier they're on (the next to earn).
+local function pickEntry(id)
+    state.entry, state.badge = id, nil
+    local en = currentEntry()
+    if en and en.badge then
+        state.badge = en.badge.id
+    elseif en and en.tiers then
+        local pick = en.tiers[1]
+        if state.who then
+            local st = Badges.TrackState(en.id, Badges.Of(state.who))
+            for _, b in ipairs(en.tiers) do if st and st.current == b then pick = b end end
+        end
+        state.badge = pick and pick.id
+    end
+    OUI.Refresh()
+end
+
 local function buildAward(f, parent, w)
     local a = CreateFrame("Frame", nil, parent)
     a:SetPoint("TOPLEFT")
-    a:SetSize(w, 400)
+    a:SetSize(w, 440)
 
     a.head = K.newHeading(a, "Award Badge Progress")
     a.head:SetPoint("TOPLEFT", 4, -6)
@@ -144,37 +223,58 @@ local function buildAward(f, parent, w)
     end)
     a.name:SetScript("OnEditFocusLost", function() C_Timer.After(0.2, function() a.typed = nil; OUI.Refresh() end) end)
 
-    -- Badge: the game's dropdown, grouped by category.
-    label("Badge", -96)
-    local okDD, dd = pcall(CreateFrame, "DropdownButton", nil, a, "WowStyle1DropdownTemplate")
-    if okDD and dd and dd.SetupMenu then
-        dd:SetWidth(280)
-        dd:SetPoint("TOPLEFT", X, -90)
-        if dd.SetDefaultText then dd:SetDefaultText("Pick a badge") end
-        dd:SetupMenu(function(_, root)
+    -- What to award, in three steps: a section (category > subsection), a
+    -- badge in it (a tier track is one), and - a track's - its tier, by
+    -- Progress. Each is the game's dropdown.
+    local function dropdown(width, x, y, default)
+        local ok, dd = pcall(CreateFrame, "DropdownButton", nil, a, "WowStyle1DropdownTemplate")
+        if not (ok and dd and dd.SetupMenu) then return nil end
+        dd:SetWidth(width)
+        dd:SetPoint("TOPLEFT", x, y)
+        if dd.SetDefaultText then dd:SetDefaultText(default) end
+        return dd
+    end
+    label("Section", -96)
+    a.section = dropdown(280, X, -90, "Pick a section")
+    label("Badge", -136)
+    a.badge = dropdown(280, X, -130, "Pick a badge")
+    if a.section and a.badge then
+        a.section:SetupMenu(function(_, root)
             for _, top in ipairs(Badges.CATEGORIES) do
+                local subs = {}
                 for _, c in ipairs(top.children or {}) do
-                    local list = {}
-                    for _, b in ipairs(Badges.Grantable(c.id)) do
-                        local past = (b.parent and b.month ~= Badges.BOUNTY.month) or Badges.CategorySoon(b.cat)
-                        if not past and ns.Ledger.CanAward(nil, b.id) then list[#list + 1] = b end
-                    end
-                    if #list > 0 then
-                        root:CreateTitle(top.name .. ": " .. c.name)
-                        for _, b in ipairs(list) do
-                            root:CreateRadio(Badges.Coin(b) .. Badges.Title(b), function(id) return state.badge == id end,
-                                function(id) state.badge = id; OUI.Refresh() end, b.id)
-                        end
+                    if #entriesOf(c.id) > 0 then subs[#subs + 1] = c end
+                end
+                if #subs > 0 then
+                    local sub = root:CreateButton(top.name)
+                    for _, c in ipairs(subs) do
+                        sub:CreateRadio(c.name, function(id) return state.section == id end, pickSection, c.id)
                     end
                 end
             end
         end)
-        a.dropdown = dd
+        a.badge:SetupMenu(function(_, root)
+            if not state.section then root:CreateTitle("Pick a section first"); return end
+            for _, en in ipairs(entriesOf(state.section)) do
+                local r = root:CreateRadio(iconText(en.icon) .. en.name, function(id) return state.entry == id end, pickEntry, en.id)
+                local lines = {}
+                if en.tiers then
+                    for _, b in ipairs(en.tiers) do lines[#lines + 1] = Badges.Coin(b) .. b.desc end
+                else
+                    lines[1] = en.badge.desc
+                end
+                menuTip(r, en.name, lines)
+            end
+        end)
+        a.dropdown = a.badge
     else
         -- (no dropdown template: a button that goes through the badges)
+        if a.section then a.section:Hide() end
+        if a.badge then a.badge:Hide() end
+        a.section, a.badge = nil, nil
         local b = CreateFrame("Button", nil, a, "UIPanelButtonTemplate")
         b:SetSize(280, 22)
-        b:SetPoint("TOPLEFT", X + 2, -92)
+        b:SetPoint("TOPLEFT", X + 2, -132)
         b:SetScript("OnClick", function()
             local list, at = Badges.LIST, 0
             for i, x in ipairs(list) do if x.id == state.badge then at = i end end
@@ -184,17 +284,29 @@ local function buildAward(f, parent, w)
         a.cycle = b
     end
 
-    label("Progress", -136)
+    label("Progress", -176)
+    -- (a track's tier: only for a track)
+    a.tier = dropdown(150, X, -170, "Pick a tier")
+    if a.tier then
+        a.tier:SetupMenu(function(_, root)
+            local en = currentEntry()
+            for _, b in ipairs(en and en.tiers or {}) do
+                local r = root:CreateRadio(Badges.Coin(b) .. Badges.TierName(b), function(id) return state.badge == id end,
+                    function(id) state.badge = id; OUI.Refresh() end, b.id)
+                menuTip(r, Badges.TierName(b), { b.desc })
+            end
+        end)
+    end
     a.amount = input(a, 60, true)
-    a.amount:SetPoint("TOPLEFT", X + 6, -132)
+    a.amount:SetPoint("TOPLEFT", X + 6, -172)
     a.amount:SetScript("OnTextChanged", function(_, user) if user then OUI.Refresh() end end)
     a.amountNote = K.text(a, "GameFontHighlightSmall")
     a.amountNote:SetPoint("LEFT", a.amount, "RIGHT", 10, 0)
     a.amountNote:SetPoint("RIGHT", a, "RIGHT", -8, 0)
 
-    label("Note", -172)
+    label("Note", -212)
     a.note = input(a, w - X - 24)
-    a.note:SetPoint("TOPLEFT", X + 6, -168)
+    a.note:SetPoint("TOPLEFT", X + 6, -208)
     a.note:SetMaxLetters(80)
     a.noteHint = K.text(a, "GameFontDisableSmall")
     a.noteHint:SetPoint("TOPLEFT", a.note, "BOTTOMLEFT", -4, -3)
@@ -202,17 +314,21 @@ local function buildAward(f, parent, w)
 
     -- Where they stand, and what this would do.
     a.card = CreateFrame("Frame", nil, a)
-    a.card:SetPoint("TOPLEFT", 4, -214)
+    a.card:SetPoint("TOPLEFT", 4, -254)
     a.card:SetPoint("RIGHT", a, "RIGHT", -4, 0)
-    a.card:SetHeight(74)
+    a.card:SetHeight(96)
     a.card.bg = a.card:CreateTexture(nil, "BACKGROUND"); a.card.bg:SetAllPoints()
     if not K.atlas(a.card.bg, "Legacy-Challenge-Cards-Bar") then a.card.bg:SetColorTexture(0.15, 0.12, 0.08, 0.8) end
     a.card.icon = K.newIcon(a.card, 46)
     a.card.icon:SetPoint("LEFT", 10, 0)
     a.card.title = K.text(a.card, "GameFontHighlight")
-    a.card.title:SetPoint("TOPLEFT", a.card.icon, "TOPRIGHT", 12, -2)
+    a.card.title:SetPoint("TOPLEFT", a.card, "TOPLEFT", 68, -12)
+    a.card.desc = K.text(a.card, "GameFontHighlightSmall")             -- (what it takes)
+    a.card.desc:SetPoint("TOPLEFT", a.card.title, "BOTTOMLEFT", 0, -4)
+    a.card.desc:SetPoint("RIGHT", a.card, "RIGHT", -16, 0)
+    a.card.desc:SetWordWrap(true)
     a.card.bar = K.newBar(a.card, 16)
-    a.card.bar:SetPoint("TOPLEFT", a.card.title, "BOTTOMLEFT", 4, -8)
+    a.card.bar:SetPoint("TOPLEFT", a.card.desc, "BOTTOMLEFT", 4, -6)
     a.card.bar:SetPoint("RIGHT", a.card, "RIGHT", -16, 0)
     a.card.after = K.text(a.card, "GameFontNormalSmall")
     a.card.after:SetPoint("TOPLEFT", a.card.bar, "BOTTOMLEFT", -4, -6)
@@ -223,7 +339,7 @@ local function buildAward(f, parent, w)
     local function button(label, prev)
         local b = CreateFrame("Button", nil, a, "UIPanelButtonTemplate")
         b:SetSize(bw, 24)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 8, 0) else b:SetPoint("TOPLEFT", 8, -300) end
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 8, 0) else b:SetPoint("TOPLEFT", 8, -362) end
         b:SetText(label)
         return b
     end
@@ -306,12 +422,32 @@ local function fillAward(f)
     end
 
     local b = state.badge and Badges.Get(state.badge)
-    if a.dropdown and a.dropdown.GenerateMenu then pcall(a.dropdown.GenerateMenu, a.dropdown) end
+    -- The three dropdowns: what's picked, and the tier only for a track.
+    local en = currentEntry()
+    for _, dd in ipairs({ a.section, a.badge, a.tier }) do
+        if dd.GenerateMenu then pcall(dd.GenerateMenu, dd) end
+    end
+    if a.section and a.section.OverrideText then
+        pcall(a.section.OverrideText, a.section, state.section and sectionLabel(state.section) or "Pick a section")
+    end
+    if a.badge and a.badge.OverrideText then
+        pcall(a.badge.OverrideText, a.badge, en and (iconText(en.icon) .. en.name) or (state.section and "Pick a badge" or "Pick a section first"))
+    end
+    if a.badge then a.badge:SetEnabled(state.section and true or false) end
+    local tiered = a.tier and en and en.tiers and true or false
+    if a.tier then
+        a.tier:SetShown(tiered)
+        if tiered and a.tier.OverrideText then
+            pcall(a.tier.OverrideText, a.tier, b and (Badges.Coin(b) .. Badges.TierName(b)) or "Pick a tier")
+        end
+    end
+    a.amount:ClearAllPoints()
+    if tiered then a.amount:SetPoint("LEFT", a.tier, "RIGHT", 14, 0) else a.amount:SetPoint("TOPLEFT", 116, -172) end
     if a.cycle then a.cycle:SetText(badgeLabel(b)) end
 
     local manual = b and (b.kind == "manual" or b.kind == "manualweekly")
     if not b then
-        a.amountNote:SetText("|cff9d9d9dPick a Patrol badge to add progress.|r")
+        a.amountNote:SetText("|cff9d9d9dPick a badge.|r")
     elseif manual then
         a.amountNote:SetText("patrols to add or remove")
     elseif b.kind == "granted" then
@@ -328,7 +464,8 @@ local function fillAward(f)
         local r = Badges.Of(state.who)
         local e = r.badges[b.id]
         K.setBadgeIcon(a.card.icon, b, e.times > 0)
-        a.card.title:SetText(("%s - %s"):format(who(state.who), Badges.Title(b)))
+        a.card.title:SetText(("%s - %s%s"):format(who(state.who), Badges.Coin(b), Badges.Title(b)))
+        a.card.desc:SetText(b.desc or "")
         if b.kind == "granted" or b.kind == "rank" then
             a.card.bar:Set(e.times > 0 and 1 or 0, 1, e.times > 0 and ("Earned x%d"):format(e.times) or "Not earned")
         else
@@ -357,7 +494,7 @@ local function fillAward(f)
     a.grant:SetEnabled(ready and true or false)
     a.revoke:SetEnabled((ready and ns.Ledger.LatestGiving(state.who, b.id)) and true or false)
     if not a.confirm and a.result:GetText() and a.result:GetText():find("Click again") then a.result:SetText("") end
-    return 360
+    return 420
 end
 
 ---------------------------------------------------------------------------

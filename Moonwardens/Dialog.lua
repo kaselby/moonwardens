@@ -9,6 +9,8 @@
 -- `when`: Day / Hour / Minute / AM-PM dropdowns (nothing typed, so nothing
 -- to get wrong); onAccept gets the moment picked, as a timestamp. onAccept
 -- may return false, "why" to keep the box open and say why.
+-- `noCancel`: one button, centred. `noEscape`: Escape doesn't close it
+-- (only its button does). `title`: a heading above the text, larger.
 local _, ns = ...
 local Dialog = {}
 ns.Dialog = Dialog
@@ -18,6 +20,14 @@ local DAYS = 7                 -- the picker goes back this many days, today inc
 local f
 local current
 local pick = {}                -- day (0 = today), hour (1-12), min (0-55), pm
+
+-- Escape closes it (it's one of the game's UISpecialFrames) - or not.
+local function escapeCloses(on)
+    local at
+    for i, name in ipairs(UISpecialFrames) do if name == "MoonwardensDialog" then at = i end end
+    if on and not at then tinsert(UISpecialFrames, "MoonwardensDialog")
+    elseif not on and at then tremove(UISpecialFrames, at) end
+end
 
 -- The moment picked, as a timestamp (this computer's clock and time zone).
 local function picked()
@@ -105,6 +115,11 @@ local function build()
         tile = true, tileSize = 32, edgeSize = 32,
         insets = { left = 11, right = 12, top = 12, bottom = 11 },
     })
+    f.title = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    f.title:SetPoint("TOP", 0, -20)
+    f.title:SetWidth(WIDTH - 50)
+    f.title:SetJustifyH("CENTER")
+    f.title:Hide()
     f.text = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     f.text:SetPoint("TOP", 0, -20)
     f.text:SetWidth(WIDTH - 50)
@@ -131,9 +146,10 @@ local function build()
     f:SetScript("OnHide", function()
         current = nil
         f.edit:ClearFocus()
+        escapeCloses(true)
     end)
     f:Hide()
-    tinsert(UISpecialFrames, "MoonwardensDialog")   -- (Escape closes it, as the game's do)
+    escapeCloses(true)              -- (Escape closes it, as the game's do)
 end
 
 function Dialog.Show(opts)
@@ -143,10 +159,26 @@ function Dialog.Show(opts)
         return
     end
     current = opts
+    local top = 20
+    f.text:ClearAllPoints()
+    if opts.title then
+        f.title:SetText(opts.title)
+        f.title:Show()
+        f.text:SetPoint("TOP", f.title, "BOTTOM", 0, -10)
+        top = top + f.title:GetStringHeight() + 10
+    else
+        f.title:Hide()
+        f.text:SetPoint("TOP", 0, -20)
+    end
     f.text:SetText(opts.text or "")
     f.ok:SetText(opts.accept or OKAY or "Okay")
+    f.cancel:SetShown(not opts.noCancel)
+    f.ok:ClearAllPoints()
+    if opts.noCancel then f.ok:SetPoint("BOTTOM", f, "BOTTOM", 0, 16)
+    else f.ok:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 16) end
+    escapeCloses(not opts.noEscape)
     f.err:SetText("")
-    local h = 20 + f.text:GetStringHeight() + 16
+    local h = top + f.text:GetStringHeight() + 16
     local below = f.text
     f.edit:ClearAllPoints()
     if opts.edit then

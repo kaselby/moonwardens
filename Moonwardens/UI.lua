@@ -232,6 +232,22 @@ end
 
 UI.AddPage(9, "Settings", buildSettings, refreshSettings)
 
+-- Once (per account): where Moonwardens went, in our dialog, a few seconds
+-- after loading in. Only its button closes it (not Escape); after that it
+-- never shows again. Closed any other way, it shows again next time.
+ns.onLogin(function()
+    if ns.db.movedNoticeSeen then return end
+    ns.after(4, function()
+        if ns.db.movedNoticeSeen or not ns.Dialog then return end
+        ns.Dialog.Show({
+            title = "Moonwardens",
+            text = "Moonwardens has moved to your Guild & Communities tab.\n|cffffd100J|r by default",
+            accept = OKAY or "Okay", noCancel = true, noEscape = true,
+            onAccept = function() ns.db.movedNoticeSeen = true end,
+        })
+    end, "moved notice")
+end, "moved notice")
+
 ---------------------------------------------------------------------------
 -- Minimap button
 ---------------------------------------------------------------------------
