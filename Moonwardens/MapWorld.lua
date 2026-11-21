@@ -23,7 +23,7 @@ local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
 -- party/raid dots. (0.5.3 also ringed group members' dots; the rings lagged
 -- the game's dots and looked clunky, so 0.5.4 turned them off. NewHalo and
 -- GroupPositions stay for now, unused.)
-ns.DOT_DIAMOND = 13
+ns.DOT_DIAMOND = 12
 local DOT_SIZE = ns.DOT_DIAMOND
 local HALO_SIZE = 20
 local HOVER_RADIUS = 6       -- a 12 px hit, as OpenMap's player dots

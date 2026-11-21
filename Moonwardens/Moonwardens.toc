@@ -10,6 +10,7 @@
 
 Core.lua
 Comm.lua
+Version.lua
 Roster.lua
 RP.lua
 Position.lua
