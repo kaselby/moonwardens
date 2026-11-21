@@ -125,6 +125,19 @@ end
 
 function Layer.State() return state end
 
+-- From game build 71037 every creature carries a number of its own: the
+-- server part no longer names a layer (LayerSwap 1.14.41, measured on live
+-- Forever, 20 Nov 2026). Then layers come from LayerLink.lua instead.
+local private
+function Layer.Private()
+    if private == nil then
+        private = false
+        local ok, _, build = pcall(GetBuildInfo)
+        if ok and (tonumber(build) or 0) >= 71037 then private = true end
+    end
+    return private
+end
+
 local function inBorderQuiet() return ns.now() - borderAt < BORDER_QUIET end
 
 local function setLayer(map, server, n, src)
@@ -359,13 +372,18 @@ local function tick()
     blink(now)
 end
 
--- "Layer 2 (7075)" for the minimap button tooltip.
+-- For the minimap button tooltip: how many guildies here share my layer.
 function Layer.TooltipLine()
     local map = currentMap()
-    local mine = map and Layer.Mine(map) or 0
-    if mine == 0 then return "Your layer: not known yet (target or pass a few NPCs)", 0.62, 0.62, 0.62 end
-    local label = ns.Position.LayerLabel(map, mine) or "Layer"
-    return ("Your layer: %s  |cff9d9d9d(%d)|r"):format(label, mine), 0.4, 0.8, 1
+    if not map then return nil end
+    local list, unknown = ns.Position.LayersIn(map)
+    local yours, other = 0, 0
+    for _, e in ipairs(list) do
+        if e.mine then yours = e.n - 1 else other = other + e.n end
+    end
+    if yours + other + unknown == 0 then return nil end
+    return ("On your layer here: %d guildie%s%s"):format(yours, yours == 1 and "" or "s",
+        (other + unknown > 0) and ("  |cff9d9d9d(%d elsewhere or not known)|r"):format(other + unknown) or ""), 0.4, 0.8, 1
 end
 
 ns.onLogin(function()
@@ -417,9 +435,10 @@ ns.slash.layer = { help = "your layer in this zone and how it was found", fn = f
     if mine == 0 then
         ns.print("your layer here isn't known yet. Target, mouse over or pass near a few NPCs.")
     else
-        ns.print(("you are on %s here (server number %d), %s, %d sightings, last %d s ago."):format(
-            ns.Position.LayerLabel(map, mine) or "a layer", mine,
-            state.single and "provisional (one creature so far)" or "confirmed", state.n, ns.now() - state.at))
+        ns.print(("server number %d here, %s, %d sightings, last %d s ago%s."):format(
+            mine,
+            state.single and "provisional (one creature so far)" or "confirmed", state.n, ns.now() - state.at,
+            Layer.Private() and " (this game build gives every creature its own number: it names no layer)" or ""))
     end
     if recheck then ns.print("  rechecking: the next creature seen will confirm or replace it.") end
     if #votes > 0 then ns.print("  last creatures: " .. table.concat(votes, ", ")) end
@@ -429,6 +448,17 @@ ns.slash.layer = { help = "your layer in this zone and how it was found", fn = f
     ns.print(("  GUIDs read %d, used %d, player-controlled skipped %d, from NPC speech %d, nameplate showings %d%s."):format(
         stats.seen, stats.used, stats.pets, stats.speech, stats.blinks,
         layerSwapLoaded() and " (LayerSwap does the showings)" or ""))
+    -- Guildies here, by the evidence between us (LayerLink.lua).
+    if ns.LayerLink and map then
+        local n, p, ep = ns.LayerLink.Counts()
+        ns.print(("  sightings to compare: %d creatures, %d players (epoch %d)."):format(n, p, ep))
+        for key, g in pairs(ns.Position.All()) do
+            if g.map == map then
+                local rel, sure = ns.Position.Relation(g)
+                ns.print(("  %s: %s - %s"):format(key, ns.Position.RelationText(rel, sure) or rel, ns.LayerLink.Explain(key)))
+            end
+        end
+    end
 end }
 
 ---------------------------------------------------------------------------

@@ -212,48 +212,94 @@ end
 -- with the same data sees the same "Layer 2".
 ---------------------------------------------------------------------------
 
--- Sorted list of { layer, n, mine, keys } for a map, plus the unknown count
--- and the keys of those whose layer is unknown. `keys`: who is on it (me too).
+-- Guildies in a zone by how their layer relates to mine: { label, n, mine,
+-- keys, sub } for "Your layer" (me too) and "Another layer", plus the
+-- unknown count and keys. There are no layer numbers to tell layers apart any
+-- more (build 71037), so other layers aren't split: "Another layer" may be
+-- several. `sub`: how many of them are only leads ("2 probable").
+-- Another zone than mine: everyone there is unknown to me.
 function Position.LayersIn(map)
-    local by, unknown, unknownKeys = {}, 0, {}
-    local function add(layer, key, isMe)
-        if not layer or layer == 0 then
-            unknown = unknown + 1
-            unknownKeys[#unknownKeys + 1] = key
-            return
+    -- Agreed numbers (LayerLink.lua): "Layer 1", "Layer 2"..., mine marked.
+    if ns.LayerLink and ns.LayerLink.LayersOf then
+        local layers, loose = ns.LayerLink.LayersOf(map)
+        local myN = (me.map == map) and ns.LayerLink.MyLabel() or nil
+        local list = {}
+        for _, e in ipairs(layers) do
+            list[#list + 1] = { label = ("Layer %d%s"):format(e.n, e.n == myN and " - yours" or ""), n = #e.keys,
+                keys = e.keys, mine = e.n == myN, sub = e.leads > 0 and (e.leads .. " probable") or "" }
         end
-        local e = by[layer] or { layer = layer, n = 0, keys = {} }
-        e.n = e.n + 1
-        e.keys[#e.keys + 1] = key
-        if isMe then e.mine = true end
-        by[layer] = e
+        if #list > 0 or #loose > 0 then return list, #loose, loose end
     end
+    local yours = { label = "Your layer", n = 0, keys = {}, mine = true, leads = 0 }
+    local other = { label = "Another layer", n = 0, keys = {}, leads = 0 }
+    local unknown, unknownKeys = 0, {}
     for key, g in pairs(Position.All()) do
-        if g.map == map then add(g.layer, key) end
+        if g.map == map then
+            local rel, sure = Position.Relation(g)
+            local e = rel == "same" and yours or rel == "other" and other or nil
+            if e then
+                e.n = e.n + 1
+                e.keys[#e.keys + 1] = key
+                if not sure then e.leads = e.leads + 1 end
+            else
+                unknown = unknown + 1
+                unknownKeys[#unknownKeys + 1] = key
+            end
+        end
     end
-    if me.map == map and ns.meKey then add(myLayer(map), ns.meKey, true) end
     local list = {}
-    for _, e in pairs(by) do list[#list + 1] = e end
-    table.sort(list, function(a, b) return a.layer < b.layer end)
-    for i, e in ipairs(list) do e.label = "Layer " .. i end
+    if me.map == map and ns.meKey then
+        yours.n = yours.n + 1
+        yours.keys[#yours.keys + 1] = ns.meKey
+        list[#list + 1] = yours
+    elseif yours.n > 0 then
+        list[#list + 1] = yours
+    end
+    if other.n > 0 then list[#list + 1] = other end
+    for _, e in ipairs(list) do e.sub = e.leads > 0 and (e.leads .. " probable") or "" end
     return list, unknown, unknownKeys
 end
 
-function Position.LayerLabel(map, layer)
-    if not layer or layer == 0 then return nil end
-    for _, e in ipairs(Position.LayersIn(map)) do
-        if e.layer == layer then return e.label end
-    end
-end
+-- (Layer numbers have no labels any more: kept for older callers.)
+function Position.LayerLabel() return nil end
 
 -- How a guildie's layer relates to mine: "same", "other", "unknown", or
 -- "na" (other zone, or no layer detector yet: drawn solid).
+-- A second result says whether it's proven (true) or only a lead (false).
+-- Layer numbers decide where the game still gives a shared one (before build
+-- 71037); evidence between players (LayerLink.lua) everywhere else.
 function Position.Relation(g)
     if not ns.Layer or g.map ~= me.map then return "na" end
-    if Position.SeenRecently(g.key) then return "same" end -- seeing them proves it
-    local mine = myLayer(me.map)
-    if not g.layer or g.layer == 0 or mine == 0 then return "unknown" end
-    return g.layer == mine and "same" or "other"
+    if Position.SeenRecently(g.key) then return "same", true end -- seeing them proves it
+    if not (ns.Layer.Private and ns.Layer.Private()) then
+        local mine = myLayer(me.map)
+        if g.layer and g.layer ~= 0 and mine ~= 0 then return g.layer == mine and "same" or "other", true end
+    end
+    if ns.LayerLink then
+        local rel, sure = ns.LayerLink.Relation(g)
+        if rel then return rel, sure end
+    end
+    return "unknown"
+end
+
+-- A guildie's layer as a line of text: the agreed number (LayerLink.lua)
+-- when there is one, "your layer" when it's mine; else the relation.
+function Position.LayerText(g)
+    local LL = ns.LayerLink
+    local n, lead, map
+    if LL then n, lead, map = LL.Label(g.key) end
+    if n then
+        local mine = map == me.map and LL.MyLabel() == n
+        return ("Layer %d%s%s"):format(n, lead and "?" or "", mine and " - your layer" or ""), mine
+    end
+    return Position.RelationText(Position.Relation(g))
+end
+
+-- How a relation reads in tooltips and lists.
+function Position.RelationText(rel, sure)
+    if rel == "same" then return sure and "Your layer" or "Probably your layer" end
+    if rel == "other" then return sure and "Another layer" or "Probably another layer" end
+    if rel == "unknown" then return "Layer not known yet" end
 end
 
 -- Is a profile's class just the game's class? totalRP3 fills a new profile's
@@ -310,11 +356,8 @@ function Position.AddTooltip(tt, g)
     end
     if Position.HasFlag(g, Position.FLAG_DEAD) then tt:AddLine("Dead", 0.62, 0.62, 0.62)
     elseif Position.HasFlag(g, Position.FLAG_COMBAT) then tt:AddLine("In combat", 1, 0.25, 0.25) end
-    local rel = Position.Relation(g)
-    local label = Position.LayerLabel(g.map, g.layer)
-    if rel == "same" then tt:AddLine((label or "Layer") .. " (same as you)", 0.75, 0.75, 0.75)
-    elseif rel == "other" then tt:AddLine((label or "Layer") .. " (not yours)", 0.75, 0.75, 0.75)
-    elseif rel == "unknown" then tt:AddLine("Layer not known yet", 0.62, 0.62, 0.62) end
+    local text = Position.LayerText(g)
+    if text then tt:AddLine(text, 0.75, 0.75, 0.75) end
     local age = ns.now() - g.at
     if age > 20 then tt:AddLine(("last seen %d s ago"):format(age), 0.62, 0.62, 0.62) end
 end

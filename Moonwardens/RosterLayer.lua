@@ -1,7 +1,8 @@
 -- RosterLayer: a Layer column on the guild window's Roster tab, between
--- Zone and Rank: the server number,
--- coloured green (your layer, you included), orange (another layer in your
--- zone), grey "?" (unknown); blank for guildies we have no position for.
+-- Zone and Rank: the layer number the guild agreed for their zone
+-- (LayerLink.lua): green for mine (me included), orange for another layer in
+-- my zone, white in another zone, paler with "?" when it's only a lead; "?"
+-- grey when not known; blank for guildies with no position.
 -- Clicking its heading sorts by zone, then layer (unknown last), then name;
 -- again reverses the zones. Offline members always go last.
 -- Also: names in their RP name and colour (RP.lua, the Roleplay settings),
@@ -36,25 +37,31 @@ local RANK_W, RANK_HEAD = 95, 105
 local hooked = false
 local header
 
--- Colours by how a guildie's layer relates to mine.
+-- Colours by how a guildie's layer relates to mine; the pale ones are leads.
 local LAYER_COLOR = {
-    me = { 0.4, 0.8, 1 }, same = { 0.12, 1, 0 }, other = { 1, 0.5, 0.25 },
-    unknown = { 0.62, 0.62, 0.62 }, na = { 0.85, 0.85, 0.85 },
+    same = { 0.12, 1, 0 }, sameLead = { 0.6, 0.9, 0.55 },
+    other = { 1, 0.5, 0.25 }, otherLead = { 0.95, 0.72, 0.55 },
+    zone = { 0.9, 0.9, 0.9 }, zoneLead = { 0.7, 0.7, 0.7 },
+    unknown = { 0.62, 0.62, 0.62 }, na = { 0.5, 0.5, 0.5 },
 }
 
--- One guildie's layer: server number (0: not known yet), relation to mine,
--- map. nil when we have no position for them (no addon, offline, instance).
-local function layerOf(key)
+-- A guildie's agreed layer: number (nil: "?"), lead?, colour key. nil when
+-- we have no position for them.
+local function numberOf(key)
     if not key then return end
-    if key == ns.meKey then
-        local me = ns.Position.Me()
-        if not me.map then return end
-        return ns.Layer and ns.Layer.Mine(me.map) or 0, "me", me.map
-    end
-    local g = ns.Position.All()[key]
-    if not g then return end
-    return g.layer or 0, ns.Position.Relation(g), g.map
+    local me = ns.Position.Me()
+    local g = (key == ns.meKey) and me or ns.Position.All()[key]
+    if not (g and g.map) then return end
+    local n, lead
+    if ns.LayerLink then n, lead = ns.LayerLink.Label(key) end
+    if not n then return false, false, "unknown" end
+    local kind
+    if g.map ~= me.map then kind = "zone"
+    elseif n == ns.LayerLink.MyLabel() then kind = "same"
+    else kind = "other" end
+    return n, lead, lead and (kind .. "Lead") or kind
 end
+
 
 local function memberList()
     return CommunitiesFrame and CommunitiesFrame.MemberList
@@ -73,12 +80,10 @@ end
 -- Text and colour for one member.
 local function cellText(info)
     if offline(info) then return "" end
-    local layer, rel = layerOf(ns.key(info.name))
-    if not layer then return "" end
-    local c = LAYER_COLOR
-    if layer == 0 then return "?", c.unknown end
-    if rel == "me" then rel = "same" end           -- (one colour for your layer, you included)
-    return tostring(layer), c[rel] or c.na
+    local n, lead, k = numberOf(ns.key(info.name))
+    if n == nil then return "" end
+    if not n then return "?", LAYER_COLOR.unknown end
+    return ("Layer %d%s"):format(n, lead and "?" or ""), LAYER_COLOR[k] or LAYER_COLOR.unknown
 end
 
 -- After the game lays out a row: our cell after Zone, Rank after our cell.
@@ -222,11 +227,12 @@ local function sortList(ml)
     local rev = ml.reverseActiveColumnSort
     local keyed = {}
     for _, info in ipairs(list) do
-        local layer = not offline(info) and layerOf(ns.key(info.name)) or nil
+        local n, lead
+        if not offline(info) then n, lead = numberOf(ns.key(info.name)) end
         keyed[info] = {
             group = offline(info) and 3 or (info.zone and info.zone ~= "" and 1 or 2),
             zone = (info.zone or ""):lower(),
-            layer = (layer and layer > 0) and layer or math.huge,
+            layer = n and (n * 2 + (lead and 1 or 0)) or 999,   -- (by number, a lead after the sure ones)
             name = (info.name or ""):lower(),
             id = tostring(info.guid or info.memberId or ""),
         }
@@ -281,7 +287,9 @@ local function layoutHeader(cd, columnInfo)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local c = LAYER_COLOR
             local function key(label, col) if col then GameTooltip:AddLine(label, col[1], col[2], col[3]) end end
-            key("Your layer", c.same); key("Another layer in your zone", c.other); key("Unknown", c.unknown)
+            key("Your layer", c.same); key("Another layer in your zone", c.other)
+            key("In another zone", c.zone); key("Layer 2? - probably (a lead only)", c.otherLead)
+            key("? - unknown", c.unknown)
             GameTooltip:Show()
         end)
         header:SetScript("OnLeave", function() GameTooltip:Hide() end)

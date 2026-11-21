@@ -106,11 +106,8 @@ local function fromDot(g)
     local f = w.footer
     if P.HasFlag(g, P.FLAG_DEAD) then f[#f + 1] = { "Dead", 0.62, 0.62, 0.62 }
     elseif P.HasFlag(g, P.FLAG_COMBAT) then f[#f + 1] = { "In combat", 1, 0.25, 0.25 } end
-    local rel = P.Relation(g)
-    local label = P.LayerLabel(g.map, g.layer)
-    if rel == "same" then f[#f + 1] = { (label or "Layer") .. " (same as you)", 0.75, 0.75, 0.75 }
-    elseif rel == "other" then f[#f + 1] = { (label or "Layer") .. " (not yours)", 0.75, 0.75, 0.75 }
-    elseif rel == "unknown" then f[#f + 1] = { "Layer not known yet", 0.62, 0.62, 0.62 } end
+    local text = P.LayerText(g)
+    if text then f[#f + 1] = { text, 0.75, 0.75, 0.75 } end
     local age = ns.now() - (g.at or ns.now())
     if age > 20 then f[#f + 1] = { ("last seen %d s ago"):format(age), 0.62, 0.62, 0.62 } end
     return w

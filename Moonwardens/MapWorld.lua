@@ -567,16 +567,16 @@ local function updatePanel(map, onMap)
             c:ClearAllPoints()
             c:SetPoint("TOPLEFT", 12, y)
             c.keys = e.keys
-            c.title = e.unknownRow and "Layer not known" or (e.label .. (e.mine and " (yours)" or ""))
+            c.title = e.unknownRow and "Layer not known" or e.label
             if e.unknownRow then
                 c.name:SetText("Layer not known")
                 c.name:SetTextColor(0.75, 0.75, 0.75)
                 c.server:SetText("")
                 if c.SetBackdropBorderColor then c:SetBackdropBorderColor(0.3, 0.3, 0.3, 1) end
             else
-                c.name:SetText(e.label .. (e.mine and " |cff1eff00- you|r" or ""))
+                c.name:SetText(e.label)
                 c.name:SetTextColor(1, 0.82, 0)
-                c.server:SetText(e.layer)
+                c.server:SetText(e.sub or "")
                 if c.SetBackdropBorderColor then
                     if e.mine then c:SetBackdropBorderColor(0.85, 0.68, 0.1, 1) else c:SetBackdropBorderColor(0.3, 0.3, 0.3, 1) end
                 end
