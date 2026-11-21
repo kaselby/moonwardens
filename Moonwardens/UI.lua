@@ -1,12 +1,16 @@
 -- UI: minimap button, main window with bottom tabs, Stats and Settings pages.
--- Other modules add pages with ns.UI.AddPage(index, label, build, refresh).
+-- Other modules add pages with ns.UI.AddPage(index, label, build, refresh, guild).
+-- Pages given `guild` ({ icon = {names...}, tooltip }) live as side tabs on
+-- the game's guild window instead (GuildTabs.lua); the window keeps the rest,
+-- and takes them back if that window can't be used.
 local _, ns = ...
 local UI = {}
 ns.UI = UI
 
 local WIDTH, HEIGHT = 560, 470
 local win
-local pages = {}   -- index -> { label, build, refresh, frame }
+local pages = {}   -- index -> { label, build, refresh, guild, frame }
+UI.pages = pages
 
 -- Try templates in order: Forever's 12.x code has the Mainline ones, but we
 -- don't depend on any single one existing.
@@ -37,7 +41,8 @@ local function selectPage(i)
         if p.frame then p.frame:SetShown(j == i) end
     end
     win.current = i
-    if PanelTemplates_SetTab then pcall(PanelTemplates_SetTab, win, i) end
+    -- (tabs are numbered by position, not by page index)
+    if PanelTemplates_SetTab and pages[i] and pages[i].tabIndex then pcall(PanelTemplates_SetTab, win, pages[i].tabIndex) end
     local p = pages[i]
     if p and p.refresh then ns.guard(p.refresh, "page " .. p.label)(p.frame) end
 end
@@ -74,7 +79,10 @@ local function buildWindow()
     end
 
     local order = {}
-    for i in pairs(pages) do order[#order + 1] = i end
+    local guildHost = ns.GuildTabs and ns.GuildTabs.Hosting()
+    for i, p in pairs(pages) do
+        if not (p.guild and guildHost) then order[#order + 1] = i end
+    end
     table.sort(order)
     win.Tabs = {}
     for n, i in ipairs(order) do
@@ -100,18 +108,33 @@ local function buildWindow()
     win:SetScript("OnShow", function() selectPage(win.current or order[1]) end)
 end
 
-function UI.AddPage(index, label, build, refresh)
-    pages[index] = { label = label, build = build, refresh = refresh }
+function UI.AddPage(index, label, build, refresh, guild)
+    pages[index] = { label = label, build = build, refresh = refresh, guild = guild }
+end
+
+-- Rows that fit a list page: `top` pixels above the first row, a footer
+-- below the last. Height not known yet: 14, what the Moonwardens window fits.
+function UI.RowsFor(f, max, rowH, top)
+    local h = f.GetHeight and f:GetHeight() or 0
+    if not h or h < 100 then return math.min(max, 14) end
+    return math.max(5, math.min(max, math.floor((h - top - 30) / rowH)))
 end
 
 function UI.Refresh()
     if win and win:IsShown() and win.current then selectPage(win.current) end
+    if ns.GuildTabs then ns.GuildTabs.Refresh() end
 end
 
+-- Open a page (or toggle: no index). Guild pages open on the guild window;
+-- with no index that means Stats, the first of them.
 function ns.ToggleWindow(index)
+    local p = index and pages[index]
+    if ns.GuildTabs and ns.GuildTabs.Available() and (not index or (p and p.guild)) then
+        if ns.GuildTabs.Toggle(index) then return end
+    end
     if not win then buildWindow() end
-    if index then win.current = index end
-    if win:IsShown() and not index then win:Hide() else win:Show(); if index then selectPage(index) end end
+    if index and p and p.tabIndex then win.current = index end
+    if win:IsShown() and not index then win:Hide() else win:Show(); if index and p and p.tabIndex then selectPage(index) end end
 end
 
 ---------------------------------------------------------------------------
@@ -251,7 +274,10 @@ UI.SETTINGS = {
     { "worldDots", "Show guildies on the world map" },
     { "otherLayers", "Show guildies on other layers (faded)" },
     { "minimapDots", "Show guildies on the minimap" },
-    -- totalRP3 profiles (RP.lua). Without totalRP3 these change nothing.
+    { "layerPlates", "Show nameplates for a moment to read my layer" },
+    -- totalRP3 profiles (RP.lua): maps, the guild roster and the
+    -- Leaderboard tab. Profiles guildies phoned in work without totalRP3.
+    { "Roleplay" },
     { "rpColors", "Show guildies custom Roleplay colors" },
     { "rpNames", "Show guildies custom Roleplay names/class names" },
     -- Research section ("Help collect layer data") comes back with the data log (0.6).
@@ -285,7 +311,8 @@ local function refreshSettings(f)
     for k, cb in pairs(f.checks) do cb:SetChecked(ns.db[k] and true or false) end
 end
 
-UI.AddPage(1, "Stats", buildStats, refreshStats)
+UI.AddPage(1, "Stats", buildStats, refreshStats,
+    { order = 2, icon = { "INV_Misc_Book_09", "INV_Misc_Book_11" }, tooltip = "Stats" })
 UI.AddPage(9, "Settings", buildSettings, refreshSettings)
 
 ---------------------------------------------------------------------------
@@ -308,8 +335,7 @@ function UI.MinimapTooltip(tt)
         local text, r, g, b = ns.Layer.TooltipLine()
         if text then tt:AddLine(text, r, g, b) end
     end
-    tt:AddLine("Left-click: open window", 0.62, 0.62, 0.62)
-    tt:AddLine("Right-click: settings", 0.62, 0.62, 0.62)
+    tt:AddLine("Click: settings", 0.62, 0.62, 0.62)
     tt:AddLine("Drag: move this button", 0.62, 0.62, 0.62)
 end
 
@@ -328,7 +354,10 @@ local function buildMinimapButton()
     local border = mmb:CreateTexture(nil, "OVERLAY")
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     border:SetSize(53, 53); border:SetPoint("TOPLEFT")
-    mmb:SetScript("OnClick", function(_, button) ns.ToggleWindow(button == "RightButton" and 9 or nil) end)
+    -- Settings only: the other pages are tabs on the guild window (J).
+    mmb:SetScript("OnClick", function()
+        if MoonwardensFrame and MoonwardensFrame:IsShown() then MoonwardensFrame:Hide() else ns.ToggleWindow(9) end
+    end)
     mmb:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         UI.MinimapTooltip(GameTooltip)

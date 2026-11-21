@@ -26,7 +26,7 @@ local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
 ns.DOT_DIAMOND = 11
 local DOT_SIZE = ns.DOT_DIAMOND
 local HALO_SIZE = 20
-local HOVER_RADIUS = 7
+local HOVER_RADIUS = 6       -- a 12 px hit, as OpenMap's player dots
 local PANEL_WIDTH = 196
 
 ---------------------------------------------------------------------------
@@ -227,8 +227,9 @@ function ns.HitsKey(hits)
     return table.concat(keys, ",")
 end
 
-local STICKY = 1.6   -- a dot already in the tooltip stays "hovered" out to this times the radius
-local GRACE = 0.25   -- seconds with nothing under the cursor before the tooltip goes
+local STICKY = 1     -- a dot already in the tooltip stays "hovered" out to this times the radius (1: no wider;
+                     -- OpenMap's dots hide on leaving, and so do ours now)
+local GRACE = 0      -- seconds with nothing under the cursor before the tooltip goes (0: at once, as OpenMap)
 
 -- Dots under the cursor. `st` (a caller's tooltip state) widens the radius
 -- for dots already shown, so a dot moving under a still cursor doesn't flicker.
@@ -255,7 +256,8 @@ end
 -- someone else's tooltip that took it over in the meantime.
 function ns.HideDotTooltip(st)
     if st.key and st.owner and GameTooltip:GetOwner() == st.owner then GameTooltip:Hide() end
-    st.key, st.keys, st.missAt, st.owner = nil, {}, nil, nil
+    if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(st.owner) end
+    st.key, st.keys, st.missAt, st.owner, st.trp = nil, {}, nil, nil, nil
 end
 
 -- Show the hit dots in GameTooltip on `owner` (as in 0.5.1, for the most
@@ -267,7 +269,8 @@ function ns.ShowDotTooltip(owner, hits, st)
     st.keys = st.keys or {}
     local tt = GameTooltip
     if tt:IsShown() and tt:GetOwner() ~= owner then
-        st.key, st.keys, st.missAt, st.owner = nil, {}, nil, nil
+        if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(owner) end
+        st.key, st.keys, st.missAt, st.owner, st.trp = nil, {}, nil, nil, nil
         return
     end
     if #hits == 0 then
@@ -279,7 +282,22 @@ function ns.ShowDotTooltip(owner, hits, st)
     st.missAt = nil
     ns.SortHits(hits)
     local setKey = ns.HitsKey(hits)
-    if setKey == st.key and tt:IsShown() and tt:GetOwner() == owner then return end
+    if setKey == st.key then
+        if st.trp and ns.RosterTRP and ns.RosterTRP.IsShown(owner) then return end
+        if not st.trp and tt:IsShown() and tt:GetOwner() == owner
+            and not (ns.RosterTRP and ns.RosterTRP.Ready(owner)) then return end
+    end
+    -- One guildie alone with a totalRP3 profile: totalRP3's own tooltip
+    -- (RosterTRP.lua). Stacked with others: the shared one below. (A map
+    -- pin's tooltip, a flight master's, never gets here: see the callers.)
+    if #hits == 1 and ns.RosterTRP and ns.RosterTRP.ShowDot(owner, hits[1].d.g) then
+        if tt:GetOwner() == owner then tt:Hide() end
+        st.key, st.owner, st.trp = setKey, owner, true
+        st.keys = { [hits[1].d.g.key] = true }
+        return
+    end
+    if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(owner) end
+    st.trp = nil
     tt:SetOwner(owner, "ANCHOR_CURSOR")
     ns.AddGuildieLines(tt, hits)
     tt:Show()
@@ -730,11 +748,10 @@ local function onUpdate(_, elapsed)
         acc = 0
         MapWorld.Refresh()
     end
-    hoverAcc = hoverAcc + elapsed
-    if hoverAcc >= 0.05 then
-        hoverAcc = 0
-        MapWorld.Hover()
-    end
+    -- Hover every frame, so the tooltip comes and goes as the cursor does
+    -- (OpenMap's dots are buttons: OnEnter / OnLeave). Ours take no mouse,
+    -- so clicks and drags go to the map; this hit test stands in for that.
+    MapWorld.Hover()
 end
 
 ---------------------------------------------------------------------------

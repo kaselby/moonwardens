@@ -20,3 +20,6 @@ Compat_OpenMap.lua
 Alert.lua
 UI.lua
 Leaderboard.lua
+GuildTabs.lua
+RosterLayer.lua
+RosterTRP.lua

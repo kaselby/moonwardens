@@ -69,6 +69,7 @@ ns.DEFAULTS = {
     alertButton = true, alertButtonLocked = false, alertButtonPos = nil,
     autoInvite = true, autoRaid = true, autoAccept = false, sound = true,
     worldDots = true, otherLayers = true, minimapDots = true,
+    layerPlates = true,  -- show nameplates for a moment to read the layer (Layer.lua)
     rpColors = false, rpNames = false, -- totalRP3 profiles on the dots (RP.lua)
     dataCollection = true, minimapAngle = 200, mapKill = false,
 }
@@ -78,9 +79,10 @@ local function applyDefaults(db)
         if db[k] == nil then db[k] = v end
     end
     db.char = db.char or {}
-    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Sunday weeks
-    -- (0.6) in `weeks`; the Tuesday weeks of 0.5 in `board` are dropped.
-    if not db.weeks then db.weeks = {}; db.board = nil end
+    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Back on the
+    -- 0.5 Tuesday weeks in `board` for now; 0.6's Sunday weeks in `weeks`
+    -- are left as they are, unused, for when they come back.
+    db.board = db.board or {}
     db.data = db.data or {}     -- research log
     db.schema = 1
 end

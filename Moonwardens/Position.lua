@@ -1,5 +1,6 @@
 -- Position: where I am (sent as P), where guildies are (received P / Q).
 -- P|1|map|x|y|layer|flags|level   Q|1
+-- PQ|1: "where is everyone?" (sent after a login or /reload), answered with a P.
 -- flags: 1 = in combat, 2 = dead or ghost, 4 = data collection on.
 local _, ns = ...
 local Position = {}
@@ -16,6 +17,8 @@ local guildies = {}       -- key -> { key, map, x, y, layer, flags, level, at }
 local me = {}             -- { map, x, y, flags, layer }
 local lastSent = { at = -100 }
 local quiet = false       -- true after we sent Q (instance); next P ends it
+local replyPending = false -- a PQ answer is on its way
+local lastHeardAt = -100   -- when the last P arrived
 
 ---------------------------------------------------------------------------
 -- Reading my own position
@@ -101,6 +104,7 @@ local function onP(f, sender, key)
     g.flags = tonumber(f[7]) or 0
     g.level = tonumber(f[8])
     g.at = ns.now()
+    lastHeardAt = g.at
     g.cache = nil              -- converted positions (MapWorld) are now old
     guildies[key] = g
     ns.fire("POSITION", key, g)
@@ -330,7 +334,57 @@ ns.onLogin(function()
     ns:On("ZONE_CHANGED_NEW_AREA", function() ns.after(1, function() Position.Tick(true) end, "position zone") end)
     -- Loading screen or logout: drop my dot now; PLAYER_ENTERING_WORLD brings it back.
     ns:On("PLAYER_LEAVING_WORLD", function() sendQuiet(true) end)
-    ns:On("PLAYER_ENTERING_WORLD", function() ns.after(3, function() Position.Tick(true) end, "position enter") end)
+    ns:On("PLAYER_ENTERING_WORLD", function(isLogin, isReload)
+        -- After a login or /reload: ask everyone where they are at once,
+        -- instead of waiting up to STILL_EVERY s for each one's next P (OpenMap
+        -- does the same with its hello, answered with a place). Our own place
+        -- goes out now too; the usual 3 s / 15 s sends carry on from there.
+        -- (The queue holds both while the game won't let addons send yet.)
+        if isLogin or isReload then
+            local askedAt = ns.now()
+            ns.Comm.Send({ "PQ", ns.Comm.PROTO }, "GUILD")
+            -- Once more if nobody answered: just after a fresh login the game can
+            -- say we're in no guild yet, and the queue drops guild messages then.
+            ns.after(4, function()
+                if lastHeardAt < askedAt then ns.Comm.Send({ "PQ", ns.Comm.PROTO }, "GUILD") end
+            end, "position ask again")
+        end
+        Position.Tick(true)
+        ns.after(1, function() Position.Tick(true) end, "position enter")   -- (if the map wasn't readable yet)
+    end)
+    ns.Comm.handlers.PQ = function()
+        -- Answer once: a burst of asks (several logins) is one reply. A short
+        -- jitter keeps the guild's replies from landing in the same instant.
+        if replyPending then return end
+        replyPending = true
+        ns.after(math.random() * 0.3, function()
+            replyPending = false
+            Position.Tick(true)
+        end, "position reply")
+    end
+    -- Across a /reload: the dots we had come back at once (the game keeps
+    -- nothing of ours through one). Only fresh ones, ageing on from where they were.
+    local c = ns.db and ns.db.posCache
+    ns.db.posCache = nil
+    if type(c) == "table" and type(c.at) == "number" and type(c.list) == "table" then
+        local gap = time() - c.at
+        if gap >= 0 and gap < STALE then
+            for key, e in pairs(c.list) do
+                local age = gap + (tonumber(e.age) or STALE)
+                if type(e) == "table" and age < STALE and e.map and e.x and e.y and not guildies[key] then
+                    guildies[key] = { key = key, map = e.map, x = e.x, y = e.y, layer = e.layer or 0,
+                        flags = e.flags or 0, level = e.level, at = ns.now() - age }
+                end
+            end
+        end
+    end
+    ns:On("PLAYER_LOGOUT", function()
+        local list, now = {}, ns.now()
+        for key, g in pairs(guildies) do
+            list[key] = { map = g.map, x = g.x, y = g.y, layer = g.layer, flags = g.flags, level = g.level, age = now - g.at }
+        end
+        ns.db.posCache = { at = time(), list = list }
+    end)
 end, "position")
 
 ns.slash.where = { help = "where guildies with the addon are", fn = function()

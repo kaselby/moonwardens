@@ -21,6 +21,7 @@ local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
 local tipKey                -- hovered guildies in the tooltip we own, or nil
+local tipTrp                -- true while that tooltip is totalRP3's (RosterTRP.lua)
 
 ---------------------------------------------------------------------------
 -- Hover: guildies join the minimap's own tooltip, the way party members do.
@@ -75,30 +76,46 @@ end
 -- Every hover tick: own GameTooltip only while the game isn't using it.
 local function updateHover()
     local shown, owner = GameTooltip:IsShown(), GameTooltip:GetOwner()
+    local RT = ns.RosterTRP
     if shown and owner ~= holder then
-        tipKey = nil                -- the game's tooltip (or another's): ours ride along in it
+        if tipKey and RT then RT.Hide(holder) end
+        tipKey, tipTrp = nil, nil   -- the game's tooltip (or another's): ours ride along in it
         return
     end
     local hits = hovered()
     if #hits == 0 then
         if tipKey and owner == holder then GameTooltip:Hide() end
-        tipKey = nil
+        if tipKey and RT then RT.Hide(holder) end
+        tipKey, tipTrp = nil, nil
         return
     end
     -- Something of the game's is under the cursor too (a flight master, a
-    -- node): build its tooltip the way the game does, and our post-call adds
-    -- the guildies under its lines. Rebuilt each tick, as the game does.
+    -- node, a party member): build its tooltip the way the game does, and our
+    -- post-call adds the guildies under its lines. Rebuilt each tick, as the
+    -- game does. (Never totalRP3's tooltip here: the shared one holds them all.)
     if GameTooltip.SetMinimapMouseover and gameHasLines() then
+        if RT then RT.Hide(holder) end
         GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
         local ok = pcall(GameTooltip.SetMinimapMouseover, GameTooltip)
         if ok then
             GameTooltip:Show()
-            tipKey = "game"
+            tipKey, tipTrp = "game", nil
             return
         end
     end
     local setKey = ns.HitsKey(hits)
-    if setKey == tipKey and shown and owner == holder then return end
+    if setKey == tipKey then
+        if tipTrp and RT and RT.IsShown(holder) then return end
+        if not tipTrp and shown and owner == holder and not (RT and RT.Ready(holder)) then return end
+    end
+    -- One guildie alone with a totalRP3 profile: totalRP3's own tooltip.
+    if #hits == 1 and RT and RT.ShowDot(holder, hits[1].d.g) then
+        if GameTooltip:GetOwner() == holder then GameTooltip:Hide() end
+        tipKey, tipTrp = setKey, true
+        return
+    end
+    if tipTrp and RT then RT.Hide(holder) end
+    tipTrp = nil
     GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
     addLines(GameTooltip, hits)
     GameTooltip:Show()
