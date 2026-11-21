@@ -222,7 +222,7 @@ for _, t in ipairs({ { "copper", 3, 10 }, { "silver", 2, 15 }, { "gold", 1, 25 }
 end
 -- The Wyld Hunt. Kinds: "granted" (only ever granted, by those its
 -- `grantedBy` names, officers always; `stack`: each grant counts again) and
--- "rank" (comes with a guild rank or any above it).
+-- "rank" (comes with holding a guild rank).
 local SUELEVIN = { names = { "suelevin stormsong" } }
 for _, b in ipairs({
     { id = "hp", cat = "ritual", kind = "granted", stack = true, points = 10,
@@ -447,19 +447,12 @@ function Badges.Coin(b, size)
     return ("|T%s:%d:%d|t "):format(COIN[b.tier], size, size)
 end
 
--- Does guildie `key` hold rank `rankName` or one above it? (Server data:
--- the roster's rank, against the guild's rank list.)
+-- Does guildie `key` hold rank `rankName` - that rank itself, not one above
+-- it (officers aren't Huntresses)? (Server data: the roster's rank.)
 function Badges.HasRank(key, rankName)
     local m = key and ns.Roster and ns.Roster.Get(key)
-    if not (m and m.rankIndex and rankName) then return false end
-    if m.rank == rankName then return true end
-    local n = ns.try(GuildControlGetNumRanks) or 0
-    for i = 1, n do
-        if ns.try(GuildControlGetRankName, i) == rankName then
-            return m.rankIndex <= i - 1      -- (roster ranks count from 0, the guild master)
-        end
-    end
-    return false
+    if not (m and rankName) then return false end
+    return m.rank == rankName
 end
 
 -- Who can grant a badge, as text: "officers and Suelevin Stormsong".
@@ -609,8 +602,8 @@ function Badges.Compute(weeks, manual, key)
             e.times = math.max(0, e.times - d)
             if e.times == 0 then e.last = nil end
         end
-        -- A rank badge: held while the roster shows the rank (or above), and
-        -- kept after by its claim.
+        -- A rank badge: held while the roster shows the rank, and kept
+        -- after by its claim.
         if b.kind == "rank" then
             local c = manual.claims[b.id]
             if Badges.HasRank(key, b.rank) or (c and c.n > 0) then

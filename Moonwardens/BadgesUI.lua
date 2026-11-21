@@ -160,7 +160,7 @@ local function badgeTooltip(owner, b, e)
     elseif b.kind == "parent" then
         lines[#lines + 1] = { ("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0 }
     elseif b.kind == "rank" then
-        lines[#lines + 1] = { ("Comes with the rank of %s, or any above it."):format(b.rank), 1, 0.82, 0 }
+        lines[#lines + 1] = { ("Comes with the rank of %s."):format(b.rank), 1, 0.82, 0 }
     end
     if #lines > 0 then
         GameTooltip:AddLine(" ")
@@ -883,7 +883,7 @@ local function showCards(f, list, result)
 end
 
 ---------------------------------------------------------------------------
--- Overview (right): score, most prestigious, recent, progress
+-- Overview (right): score, most prestigious, recent
 ---------------------------------------------------------------------------
 local PRESTIGE_N, RECENT_N = 5, 5
 
@@ -900,18 +900,15 @@ local function buildOverview(f, parent, w)
     o.scoreLabel = text(o, "GameFontNormalSmall")
     o.scoreLabel:SetText("Score")
     o.scoreLabel:SetPoint("RIGHT", o.shield, "LEFT", -6, 4)
-    o.total = newBar(o, 16)
-    o.total:SetPoint("TOPLEFT", 12, -66)
-    o.total:SetPoint("TOPRIGHT", -60, -66)
 
     o.prestigeHead = newHeading(o, "Most Prestigious")
-    o.prestigeHead:SetPoint("TOPLEFT", 4, -100)
+    o.prestigeHead:SetPoint("TOPLEFT", 4, -84)
     o.tiles = {}
     local tileW = math.floor((w - 8) / PRESTIGE_N)
     for i = 1, PRESTIGE_N do
         local t = CreateFrame("Button", nil, o)
         t:SetSize(tileW, 100)
-        t:SetPoint("TOPLEFT", 4 + (i - 1) * tileW, -122)
+        t:SetPoint("TOPLEFT", 4 + (i - 1) * tileW, -106)
         t.icon = newIcon(t, 52)
         t.icon:SetPoint("TOP", 0, -4)
         t.name = text(t, "GameFontHighlightSmall")
@@ -926,15 +923,15 @@ local function buildOverview(f, parent, w)
         o.tiles[i] = t
     end
     o.prestigeEmpty = text(o, "GameFontDisable")
-    o.prestigeEmpty:SetPoint("TOPLEFT", 12, -140)
+    o.prestigeEmpty:SetPoint("TOPLEFT", 12, -124)
 
     o.recentHead = newHeading(o, "Recent Badges")
-    o.recentHead:SetPoint("TOPLEFT", 4, -236)
+    o.recentHead:SetPoint("TOPLEFT", 4, -220)
     o.recent = {}
     for i = 1, RECENT_N do
         local r = CreateFrame("Button", nil, o)
         r:SetHeight(30)
-        r:SetPoint("TOPLEFT", 4, -258 - (i - 1) * 33)
+        r:SetPoint("TOPLEFT", 4, -242 - (i - 1) * 33)
         r:SetPoint("RIGHT", o, "RIGHT", -4, 0)
         r.bg = r:CreateTexture(nil, "BACKGROUND"); r.bg:SetAllPoints()
         if not atlas(r.bg, "Legacy-Challenge-Cards-Bar") then r.bg:SetColorTexture(0.15, 0.12, 0.08, 0.8) end
@@ -952,10 +949,7 @@ local function buildOverview(f, parent, w)
         o.recent[i] = r
     end
     o.recentEmpty = text(o, "GameFontDisable")
-    o.recentEmpty:SetPoint("TOPLEFT", 12, -266)
-
-    o.progressHead = newHeading(o, "Progress")
-    o.progressBars = {}
+    o.recentEmpty:SetPoint("TOPLEFT", 12, -250)
     f.overview = o
     return o
 end
@@ -964,10 +958,8 @@ local function fillOverview(f, result, key)
     local o = f.overview
     local mine = not key or key == ns.meKey
     o.title:SetText(mine and "Your Badges" or (nameOf(key) .. "'s Badges"))
-    local have, all = Badges.CategoryCount(result)
     o.sub:SetText(("Lifetime Horde kills in Ashenvale: |cffffffff%s|r"):format(commas(result.lifetime)))
     o.shield.points:SetText(result.score)
-    o.total:Set(have, all, ("Badges earned: %d / %d"):format(have, all))
 
     local top = Badges.Prestigious(result, PRESTIGE_N)
     for i, t in ipairs(o.tiles) do
@@ -987,7 +979,7 @@ local function fillOverview(f, result, key)
     o.prestigeEmpty:SetText(mine and "No badges yet. Defend Ashenvale to earn your first." or "No badges yet.")
 
     local recent = Badges.Recent(result, RECENT_N)
-    local y = -258
+    local y = -242
     for i, r in ipairs(o.recent) do
         local it = recent[i]
         if it then
@@ -998,54 +990,14 @@ local function fillOverview(f, result, key)
             r.points:SetText(b.points .. " points")
             r.date:SetText(Badges.WeekDate(it.week))
             r:Show()
-            y = -258 - i * 33
+            y = -242 - i * 33
         else
             r:Hide()
         end
     end
     o.recentEmpty:SetShown(#recent == 0)
     o.recentEmpty:SetText("Nothing earned yet.")
-    if #recent == 0 then y = -290 end
-
-    -- Progress: one bar per category with badges; "soon" ones say so.
-    o.progressHead:ClearAllPoints()
-    o.progressHead:SetPoint("TOPLEFT", 4, y - 10)
-    y = y - 34
-    local n = 0
-    for _, top in ipairs(Badges.CATEGORIES) do
-        for _, c in ipairs(top.children or {}) do
-            n = n + 1
-            local row = o.progressBars[n]
-            if not row then
-                row = CreateFrame("Button", nil, o)
-                row:SetHeight(24)
-                row.label = text(row, "GameFontNormal")
-                row.label:SetPoint("LEFT", 8, 0)
-                row.label:SetWidth(150)
-                row.bar = newBar(row, 16)
-                row.bar:SetPoint("LEFT", 170, 0)
-                row.bar:SetPoint("RIGHT", -12, 0)
-                row:SetScript("OnClick", function(self) if not self.soon then selectCat(self.id) end end)
-                o.progressBars[n] = row
-            end
-            row.id, row.soon = c.id, c.soon
-            row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 4, y)
-            row:SetPoint("RIGHT", o, "RIGHT", -4, 0)
-            row.label:SetText(top.name .. ": " .. c.name)
-            if c.soon then
-                row.label:SetTextColor(0.5, 0.5, 0.5)
-                row.bar:Set(0, 1, "Coming soon")
-            else
-                row.label:SetTextColor(1, 0.82, 0)
-                local h, a = Badges.CategoryCount(result, c.id)
-                row.bar:Set(h, a)
-            end
-            row:Show()
-            y = y - 28
-        end
-    end
-    for i = n + 1, #o.progressBars do o.progressBars[i]:Hide() end
+    if #recent == 0 then y = -274 end
     o:SetHeight(-y + 8)
     return -y + 8
 end
