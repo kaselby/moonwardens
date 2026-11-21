@@ -293,12 +293,32 @@ local function build(f)
     local line = f:CreateTexture(nil, "ARTWORK"); line:SetColorTexture(0.35, 0.28, 0.08, 1)
     line:SetPoint("TOPLEFT", 0, y - 16); line:SetSize(508, 1)
 
+    -- Rows: hovering a guildie shows the guild roster's tooltip for them
+    -- (RosterLayer.lua: totalRP3's when it has their profile), right-click
+    -- the roster's menu (Menu.lua), as on the roster itself.
+    local function rowEnter(r)
+        local info = r.key and ns.Roster.ClubMember(r.key)
+        if info and ns.MemberTooltip then ns.MemberTooltip(r, info) end
+    end
+    local function rowLeave(r)
+        if ns.RosterTRP then ns.RosterTRP.Hide(r) end
+        if GameTooltip:GetOwner() == r then GameTooltip:Hide() end
+    end
     f.rows = {}
     for i = 1, ns.UI.RowsFor(f, ROWS, ROW_H, -y + 20) do
-        local r = CreateFrame("Frame", nil, f)
+        local r = CreateFrame("Button", nil, f)
         r:SetSize(508, ROW_H)
         r:SetPoint("TOPLEFT", 0, y - 20 - (i - 1) * ROW_H)
+        r:RegisterForClicks("RightButtonUp")
+        r:SetScript("OnEnter", ns.guard(rowEnter, "leaderboard hover"))
+        r:SetScript("OnLeave", ns.guard(rowLeave, "leaderboard hover"))
+        r:SetScript("OnClick", ns.guard(function(self)
+            rowLeave(self)
+            if self.key and ns.OpenMemberMenu then ns.OpenMemberMenu(self.key) end
+        end, "leaderboard menu"))
+        r:SetScript("OnMouseWheel", function(_, delta) local h = f:GetScript("OnMouseWheel"); if h then h(f, delta) end end)
         r.hl = r:CreateTexture(nil, "BACKGROUND"); r.hl:SetAllPoints(); r.hl:SetColorTexture(1, 0.82, 0, 0.12)
+        local over = r:CreateTexture(nil, "HIGHLIGHT"); over:SetAllPoints(); over:SetColorTexture(1, 1, 1, 0.08); over:SetBlendMode("ADD")
         r.rank = UI.Text(r, nil, nil, "RIGHT"); r.rank:SetPoint("LEFT", 0, 0); r.rank:SetWidth(24)
         r.name = UI.Text(r, nil, nil, "LEFT"); r.name:SetPoint("LEFT", 36, 0); r.name:SetWidth(210)
         r.class = UI.Text(r, nil, UI.GREY, "LEFT"); r.class:SetPoint("LEFT", 250, 0); r.class:SetWidth(180)
@@ -384,8 +404,10 @@ local function refresh(f)
             r.class:SetText(table.concat(lc, " "))
             r.n:SetText(e.c)
             r.hl:SetShown(e.key == ns.meKey)
+            r.key = e.key
             r:Show()
         else
+            r.key = nil
             r:Hide()
         end
     end

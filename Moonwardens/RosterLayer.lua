@@ -166,11 +166,11 @@ end
 -- text is cut off; we show one always, with the same lines (rank, level,
 -- race and class, zone, note), then their RP profile when the Roleplay
 -- settings are on and we have one.
+-- (ns.MemberTooltip: the same for any frame `row` and club member `info`;
+-- the Leaderboard's rows use it too.)
 local WHITE = { 1, 1, 1 }
-local function onEnter(row)
-    local info = row.GetMemberInfo and row:GetMemberInfo()
-    local ml = row.GetMemberList and row:GetMemberList()
-    if not (info and ml and isGuildList(ml)) then return end
+function ns.MemberTooltip(row, info)
+    if not (row and type(info) == "table") then return end
     -- totalRP3's own character tooltip when it has their profile (RosterTRP.lua).
     if ns.RosterTRP and ns.RosterTRP.Show(row, info) then return end
     local tt = GameTooltip
@@ -211,6 +211,13 @@ local function onEnter(row)
         if #rc > 0 then tt:AddLine(table.concat(rc, " "), 0.8, 0.8, 0.8, true) end
     end
     tt:Show()
+end
+
+local function onEnter(row)
+    local info = row.GetMemberInfo and row:GetMemberInfo()
+    local ml = row.GetMemberList and row:GetMemberList()
+    if not (info and ml and isGuildList(ml)) then return end
+    ns.MemberTooltip(row, info)
 end
 
 local function refreshRows(names)

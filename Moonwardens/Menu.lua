@@ -36,6 +36,30 @@ local function addSection(owner, root, contextData)
     end
 end
 
+-- The guild roster's right-click menu for a guildie, opened from our own
+-- lists (the Leaderboard): the same menu, with the same details the roster
+-- gives it (CommunitiesMemberListMixin:OnClubMemberButtonClicked), so it
+-- has the same entries, ours included.
+function ns.OpenMemberMenu(key)
+    if not (UnitPopup_OpenMenu and C_Club and ns.Roster.ClubMember) then return end
+    local info, club = ns.Roster.ClubMember(key)
+    if not (info and info.name and club) then return end
+    local clubInfo = ns.try(C_Club.GetClubInfo, club)
+    if type(clubInfo) ~= "table" then return end
+    local P = Enum and Enum.ClubMemberPresence
+    UnitPopup_OpenMenu("COMMUNITIES_GUILD_MEMBER", {
+        name = info.name,
+        clubMemberInfo = info,
+        clubInfo = clubInfo,
+        clubPrivileges = ns.try(C_Club.GetClubPrivileges, club),
+        clubAssignableRoles = info.memberId and ns.try(C_Club.GetAssignableRoles, club, info.memberId),
+        isSelf = info.isSelf,
+        guid = info.guid,
+        isMobile = P and info.presence == P.OnlineMobile or false,
+        isGuildMember = true,
+    })
+end
+
 ns.onLogin(function()
     if not (Menu and Menu.ModifyMenu) then return end
     for _, tag in ipairs(TAGS) do

@@ -49,6 +49,31 @@ function Roster.Build()
 end
 
 function Roster.Get(key) return members[key] end
+
+-- The game's club member info for a guildie: what the guild roster's rows
+-- hold (name, guid, level, zone, rank, note, presence...), and the guild's
+-- club id. Nil when the game hasn't got them. (Their member ids, by key,
+-- are kept and looked up again on a miss.)
+local memberIds = {}
+function Roster.ClubMember(key)
+    if not (key and C_Club and C_Club.GetGuildClubId) then return nil end
+    local club = ns.try(C_Club.GetGuildClubId)
+    if not club then return nil end
+    local id = memberIds[key]
+    local info = id and ns.try(C_Club.GetMemberInfo, club, id)
+    if type(info) == "table" and type(info.name) == "string" and ns.key(info.name) == key then return info, club end
+    info = nil
+    memberIds = {}
+    for _, mid in ipairs(ns.try(C_Club.GetClubMembers, club) or {}) do
+        local i = ns.try(C_Club.GetMemberInfo, club, mid)
+        local k = type(i) == "table" and type(i.name) == "string" and ns.key(i.name)
+        if k then
+            memberIds[k] = mid
+            if k == key then info = i end
+        end
+    end
+    if info then return info, club end
+end
 function Roster.All() return members end
 function Roster.Count() return count end
 function Roster.Loaded() return loaded end
