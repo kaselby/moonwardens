@@ -273,3 +273,115 @@ ns.onLogin(function()
         pcall(add, "CHAT_MSG_SYSTEM", function(...) return pass(pcall(systemFilter, ...)) end)
     end
 end, "rp chat")
+
+---------------------------------------------------------------------------
+-- Party and raid frames: guildies' RP names (not colours) on them, when
+-- "Show guildies custom Roleplay names" is on. After the game writes a name
+-- (UnitFrame_Update for the party frames, CompactUnitFrame_UpdateName for
+-- the raid-style party and raid frames), ours replaces it; nothing else of
+-- the frame is touched. Nameplates use CompactUnitFrame_UpdateName too and
+-- are left alone (they're forbidden to addons anyway). A name the game hides
+-- from addons (a secret value: some instances, PvP) is left as it is.
+---------------------------------------------------------------------------
+local seenFrames = setmetatable({}, { __mode = "k" })   -- frame -> "party" | "compact"
+
+local function unitKey(unit)
+    if type(unit) ~= "string" then return nil end
+    local first, last = ns.try(UnitName, unit)
+    if type(first) ~= "string" then return nil end
+    return ns.key((type(last) == "string" and last ~= "") and (first .. " " .. last) or first)
+end
+
+-- The RP name for the guildie behind `unit`, or nil to leave the game's.
+local function frameName(unit)
+    if not (ns.db and ns.db.rpNames) then return nil end
+    local key = unitKey(unit)
+    if not key or not (ns.Roster and ns.Roster.Get(key)) then return nil end
+    local rp = RP.Name(key)
+    return rp and (rp:gsub("|", "")) or nil
+end
+
+local function isGroupUnit(unit)
+    return type(unit) == "string" and (unit == "player" or unit:match("^party%d+$") or unit:match("^raid%d+$")) and true or false
+end
+
+-- After the game: ours, or (setting off, no RP name) the game's own again.
+local function applyParty(frame)
+    local fs = frame and frame.name
+    local unit = frame and frame.unit
+    if not (fs and fs.SetText and type(unit) == "string" and unit:match("^party%d+$")) then return end
+    seenFrames[frame] = "party"
+    local rp = frameName(unit)
+    if rp then fs:SetText(rp) end
+end
+
+local function applyCompact(frame)
+    if not frame or (frame.IsForbidden and frame:IsForbidden()) then return end
+    local fname = frame.GetName and frame:GetName()
+    if type(fname) ~= "string" or fname:find("NamePlate", 1, true) then return end
+    local fs, unit = frame.name, frame.unit
+    if not (fs and fs.SetText and fs:IsShown() and isGroupUnit(unit)) then return end
+    seenFrames[frame] = "compact"
+    local rp = frameName(unit)
+    if rp then fs:SetText(rp) end
+end
+
+-- A setting or a profile changed: the frames we've written to again. With
+-- the setting off they get the game's name back (as GetUnitName gives it).
+local function refreshFrames()
+    for frame, kind in pairs(seenFrames) do
+        local fs, unit = frame.name, frame.unit
+        if fs and fs.SetText and type(unit) == "string" and ns.try(UnitExists, unit) == true then
+            local rp = frameName(unit)
+            if rp then
+                fs:SetText(rp)
+            else
+                local real = ns.try(GetUnitName, unit, kind == "party")
+                if type(real) == "string" then fs:SetText(real) end
+            end
+        end
+    end
+end
+
+ns.onLogin(function()
+    if type(UnitFrame_Update) == "function" then
+        hooksecurefunc("UnitFrame_Update", function(frame) pcall(applyParty, frame) end)
+    end
+    if type(CompactUnitFrame_UpdateName) == "function" then
+        hooksecurefunc("CompactUnitFrame_UpdateName", function(frame) pcall(applyCompact, frame) end)
+    end
+    ns.listen("RP", function() pcall(refreshFrames) end)
+
+    -- totalRP3 got or changed a profile (its own, not phoned in): drop our
+    -- cache and redraw what shows RP names (at most once a second).
+    local pending = false
+    local function trpChanged()
+        if pending then return end
+        pending = true
+        ns.after(1, function() pending = false; changed() end, "rp trp data")
+    end
+    if type(TRP3_API) == "table" and TRP3_API.RegisterCallback and TRP3_Addon and TRP3_Addon.Events
+            and TRP3_Addon.Events.REGISTER_DATA_UPDATED then
+        pcall(TRP3_API.RegisterCallback, TRP3_Addon, TRP3_Addon.Events.REGISTER_DATA_UPDATED, trpChanged)
+    end
+
+    -- Someone joined: ask totalRP3 for each guildie's profile now, as a
+    -- mouseover would (its own cooldown applies), and redraw shortly after.
+    ns:On("GROUP_ROSTER_UPDATE", function()
+        if available() and TRP3_API.r and TRP3_API.r.sendQuery then
+            local raid = ns.try(IsInRaid) == true
+            for i = 1, raid and 40 or 4 do
+                local unit = (raid and "raid" or "party") .. i
+                local key = unitKey(unit)
+                local m = key and ns.Roster and ns.Roster.Get(key)
+                if m and m.name then
+                    local ok, id = pcall(TRP3_NameUtil.GetQualifiedNameFromString, m.name)
+                    if ok and type(id) == "string" then pcall(TRP3_API.r.sendQuery, id) end
+                end
+            end
+        end
+        ns.after(1, function() pcall(refreshFrames) end, "rp frames group")
+    end)
+    -- And every few seconds, for whatever arrived some other way.
+    ns.every(5, function() if ns.db and ns.db.rpNames then pcall(refreshFrames) end end, "rp frames")
+end, "rp frames")

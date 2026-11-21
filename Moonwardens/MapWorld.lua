@@ -23,7 +23,7 @@ local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
 -- party/raid dots. (0.5.3 also ringed group members' dots; the rings lagged
 -- the game's dots and looked clunky, so 0.5.4 turned them off. NewHalo and
 -- GroupPositions stay for now, unused.)
-ns.DOT_DIAMOND = 11
+ns.DOT_DIAMOND = 13
 local DOT_SIZE = ns.DOT_DIAMOND
 local HALO_SIZE = 20
 local HOVER_RADIUS = 6       -- a 12 px hit, as OpenMap's player dots
@@ -59,7 +59,8 @@ function ns.NewDot(parent, size, shape)
     end
     d.outline = disc("ARTWORK", 1, 0); d.outline:SetVertexColor(0, 0, 0, 0.9)
     d.fill = disc("ARTWORK", 2, shape == "diamond" and 2 or 1.5)   -- (a diamond's edge is thinner at the same inset)
-    d.hole = disc("ARTWORK", 3, math.floor(size * 0.32)); d.hole:SetVertexColor(0.05, 0.05, 0.05, 0.9)
+    -- (the mark of an unknown layer: a small, light centre, so the dot keeps its colour)
+    d.hole = disc("ARTWORK", 3, math.floor(size * 0.38)); d.hole:SetVertexColor(0.05, 0.05, 0.05, 0.45)
     return d
 end
 
