@@ -1,4 +1,5 @@
--- UI: minimap button, main window with bottom tabs, Stats and Settings pages.
+-- UI: minimap button, main window with bottom tabs, the Settings page.
+-- (Stats is BadgesUI.lua; the guild stats are on the Info tab, GuildInfoStats.lua.)
 -- Other modules add pages with ns.UI.AddPage(index, label, build, refresh, guild).
 -- Pages given `guild` ({ icon = {names...}, tooltip }) live as side tabs on
 -- the game's guild window instead (GuildTabs.lua); the window keeps the rest,
@@ -138,125 +139,12 @@ function ns.ToggleWindow(index)
 end
 
 ---------------------------------------------------------------------------
--- Bars (Stats page): a label, a coloured bar, a number.
----------------------------------------------------------------------------
-local function makeBar(parent)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(250, 16)
-    row.label = UI.Text(row, nil, nil, "LEFT"); row.label:SetPoint("LEFT"); row.label:SetWidth(84)
-    row.bar = CreateFrame("StatusBar", nil, row)
-    row.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    row.bar:SetPoint("LEFT", 88, 0); row.bar:SetSize(100, 11)
-    local bg = row.bar:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.6)
-    row.value = UI.Text(row, nil, nil, "RIGHT"); row.value:SetPoint("RIGHT"); row.value:SetWidth(60)
-    return row
-end
-
 -- "83%"; "<1%" for a small non-zero share.
 function UI.Pct(n, total)
     if not total or total <= 0 then return "" end
     local p = math.floor(100 * n / total + 0.5)
     if p == 0 and n > 0 then return "<1%" end
     return p .. "%"
-end
-
-local function fillBars(rows, pool, parent, anchor, entries, colorOf)
-    local total = 0
-    for _, e in ipairs(entries) do total = total + e.n end
-    table.sort(entries, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.label < b.label end)
-    local maxN = entries[1] and entries[1].n or 1
-    for i = 1, math.max(#entries, #pool) do
-        local e = entries[i]
-        local row = pool[i]
-        if e then
-            if not row then row = makeBar(parent); pool[i] = row end
-            row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (i - 1) * 18)
-            row.label:SetText(e.label)
-            local r, g, b = colorOf(e)
-            row.label:SetTextColor(r, g, b)
-            row.bar:SetStatusBarColor(r, g, b)
-            row.bar:SetMinMaxValues(0, maxN)
-            row.bar:SetValue(e.n)
-            row.value:SetText(e.n .. "  |cff9d9d9d" .. UI.Pct(e.n, total) .. "|r")
-            row:Show()
-        elseif row then
-            row:Hide()
-        end
-    end
-end
-
-local RACE_COLOR = { NightElf = { 0.79, 0.71, 0.94 } }
-local LEVEL_BANDS = { "1-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60" }
-
-local function buildStats(f)
-    f.head = UI.Text(f, nil, nil, "LEFT"); f.head:SetPoint("TOPLEFT", 0, 0)
-    f.toggle = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-    f.toggle:SetSize(22, 22); f.toggle:SetPoint("TOPRIGHT", -90, 4)
-    f.toggleLabel = UI.Text(f, "small", UI.GOLD, "LEFT"); f.toggleLabel:SetPoint("LEFT", f.toggle, "RIGHT", 2, 0)
-    f.toggleLabel:SetText("Online only")
-    f.toggle:SetScript("OnClick", function() UI.Refresh() end)
-
-    local function heading(text, x, y)
-        local h = UI.Text(f, nil, UI.GOLD, "LEFT"); h:SetPoint("TOPLEFT", x, y); h:SetText(text)
-        local line = f:CreateTexture(nil, "ARTWORK"); line:SetColorTexture(0.35, 0.28, 0.08, 1)
-        line:SetPoint("TOPLEFT", h, "BOTTOMLEFT", 0, -2); line:SetSize(250, 1)
-        return h
-    end
-    f.raceHead = heading("Race", 0, -30)
-    f.classHead = heading("Class", 270, -30)
-    f.levelHead = heading("Level", 0, -150)
-    f.racePool, f.classPool = {}, {}
-
-    f.levelBars = {}
-    for i = 1, #LEVEL_BANDS do
-        local col = CreateFrame("Frame", nil, f)
-        col:SetSize(30, 100)
-        col:SetPoint("TOPLEFT", f.levelHead, "BOTTOMLEFT", (i - 1) * 36, -8)
-        col.bar = col:CreateTexture(nil, "ARTWORK")
-        -- Plain colour, not the status-bar texture: that one is a horizontal
-        -- strip and looks smeared and low-res when stretched upward.
-        col.bar:SetColorTexture(1, 1, 1, 1)
-        if not (CreateColor and pcall(col.bar.SetGradient, col.bar, "VERTICAL",
-                CreateColor(0.75, 0.5, 0, 1), CreateColor(1, 0.85, 0.2, 1))) then
-            col.bar:SetColorTexture(1, 0.82, 0, 1)
-        end
-        col.bar:SetPoint("BOTTOM", 0, 14); col.bar:SetWidth(20)
-        col.n = UI.Text(col, "small", nil, "CENTER"); col.n:SetPoint("BOTTOM", col.bar, "TOP", 0, 2)
-        col.pct = UI.Text(col, "small", UI.GREY, "CENTER"); col.pct:SetPoint("BOTTOM", col.n, "TOP", 0, 1)
-        col.label = UI.Text(col, "small", UI.GREY, "CENTER"); col.label:SetPoint("BOTTOM", 0, 0); col.label:SetText(LEVEL_BANDS[i])
-        f.levelBars[i] = col
-    end
-    f.foot = UI.Text(f, "small", UI.GREY, "LEFT"); f.foot:SetPoint("BOTTOMLEFT", 0, 0)
-end
-
-local function refreshStats(f)
-    local onlineOnly = f.toggle:GetChecked()
-    local s = ns.Roster.Stats(onlineOnly)
-    if not ns.Roster.Loaded() then
-        f.head:SetText("Waiting for the guild roster...")
-    else
-        f.head:SetText(("|cffffffff%d|r members  |cff1eff00%d online|r  %d at level 60"):format(
-            onlineOnly and ns.Roster.Count() or s.total, s.online, s.max))
-    end
-    local races, classes = {}, {}
-    for k, e in pairs(s.race) do races[#races + 1] = { n = e.n, label = e.label, key = k } end
-    for _, e in pairs(s.class) do classes[#classes + 1] = { n = e.n, label = e.label, file = e.file } end
-    fillBars(nil, f.racePool, f, f.raceHead, races, function(e)
-        local c = RACE_COLOR[e.key] or { 0.85, 0.75, 0.6 }
-        return c[1], c[2], c[3]
-    end)
-    fillBars(nil, f.classPool, f, f.classHead, classes, function(e) return ns.classColor(e.file) end)
-    local maxBand = 1
-    for i = 1, #LEVEL_BANDS do maxBand = math.max(maxBand, s.level[i] or 0) end
-    for i, col in ipairs(f.levelBars) do
-        local n = s.level[i] or 0
-        col.bar:SetHeight(math.max(1, 60 * n / maxBand))
-        col.n:SetText(n)
-        col.pct:SetText(UI.Pct(n, s.total))
-    end
-    local foot = "Race is read for everyone on the roster, offline members included."
-    if s.unknownRace > 0 then foot = foot .. (" %d not known yet."):format(s.unknownRace) end
-    f.foot:SetText(foot)
 end
 
 ---------------------------------------------------------------------------
@@ -311,8 +199,6 @@ local function refreshSettings(f)
     for k, cb in pairs(f.checks) do cb:SetChecked(ns.db[k] and true or false) end
 end
 
-UI.AddPage(1, "Stats", buildStats, refreshStats,
-    { order = 2, icon = { "INV_Misc_Book_09", "INV_Misc_Book_11" }, tooltip = "Stats" })
 UI.AddPage(9, "Settings", buildSettings, refreshSettings)
 
 ---------------------------------------------------------------------------

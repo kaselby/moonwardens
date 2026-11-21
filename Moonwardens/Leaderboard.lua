@@ -38,6 +38,9 @@ function LB.Week()
     return math.floor((LB.NextReset() - ANCHOR) / WEEK + 0.5) - 1
 end
 
+-- When week `week` began (server time).
+function LB.WeekStart(week) return ANCHOR + week * WEEK end
+
 local function weekTable(week)
     local b = ns.db.board
     b[week] = b[week] or {}
@@ -265,6 +268,7 @@ local function build(f)
     LB.page = f
     f.week = 0 -- 0 = this week, 1 = last week
     f.title = UI.Text(f, "big", UI.GOLD, "LEFT"); f.title:SetPoint("TOPLEFT", 0, 0)
+    if ns.BadgesUI then ns.BadgesUI.Kit.bump(f.title) end
     f.title:SetText("Horde Kills in Ashenvale")
     f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -22)
 
@@ -403,7 +407,8 @@ local function refresh(f)
 end
 
 ns.UI.AddPage(5, "Leaderboard", build, refresh,
-    { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard" })   -- (the minimap button's)
+    { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard",
+      bgAtlas = "Legacy-Rewards-Tracker-background" })   -- (the minimap button's)
 
 ---------------------------------------------------------------------------
 -- Startup

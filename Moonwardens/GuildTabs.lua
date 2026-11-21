@@ -22,6 +22,33 @@ local failed = false        -- the guild window isn't shaped as we expect
 local overlay
 local tabs = {}             -- our tab buttons, in page order
 local current               -- page index shown on the guild window, or nil
+local opened = false        -- the window has been open this session (login/reload: Leaderboard first)
+local remembered            -- our page to come back to: the window reopened, or the guild picked again
+local W, H = 1018, 533      -- the window with Moonwardens picked: a quarter bigger than the game's 814 x 426
+
+-- Is the community picked in the window our guild? Everything of ours on the
+-- guild window (tabs, size, title, the roster's extras) is for it only.
+function GT.GuildPicked()
+    local cf = CommunitiesFrame
+    if not (cf and cf.GetSelectedClubId and C_Club and Enum and Enum.ClubType) then return false end
+    local ok, id = pcall(cf.GetSelectedClubId, cf)
+    if not ok or not id then return false end
+    local ok2, info = pcall(C_Club.GetClubInfo, id)
+    return ok2 and info and info.clubType == Enum.ClubType.Guild or false, info
+end
+
+-- Size and title for what's picked: ours for the guild, the game's otherwise.
+local function guildLook(guild, info)
+    local cf = CommunitiesFrame
+    local w, h = cf:GetWidth(), cf:GetHeight()
+    if guild and math.abs(w - 814) < 1 and math.abs(h - 426) < 1 then cf:SetSize(W, H)
+    elseif not guild and math.abs(w - W) < 1 and math.abs(h - H) < 1 then cf:SetSize(814, 426) end
+    local title = guild and (info and info.name ~= "" and info.name or "Moonwardens") or COMMUNITIES_FRAME_TITLE
+    if title and cf.SetTitle and cf.mwTitle ~= title then
+        cf.mwTitle = title
+        pcall(cf.SetTitle, cf, title)
+    end
+end
 
 -- First icon that exists on this client (SetTexture says false for a missing file).
 local function setIcon(tex, names)
@@ -72,10 +99,31 @@ end
 -- Our first tab (Leaderboard) takes the top spot, where the game's Chat tab
 -- was, and Chat moves down under it (the game never re-anchors Chat). The
 -- rest go under the lowest of the game's, 20 px apart as theirs are.
+-- Preferred Play Settings goes last of all, under ours, and only the guild
+-- master sees it (they're the guild's settings; only the GM can set them).
 -- No tabs of the game's (minimized, guild finder): none of ours either.
 local function layout()
     local cf = CommunitiesFrame
-    local list = cf:IsShown() and gameTabs() or {}
+    local guild, info = GT.GuildPicked()
+    guildLook(guild, info)
+    if not guild then
+        -- Another community: none of ours. Our page comes back with the guild.
+        if current then remembered = current end
+        for _, t in ipairs(tabs) do t:Hide() end
+        GT.Deselect()
+        return
+    end
+    local pps = cf.GuildPreferredPlaySettingsTab
+    if pps and pps:IsShown() and not (IsGuildLeader and IsGuildLeader()) then
+        pps:SetChecked(false)
+        pps:Hide()
+    end
+    local list = {}
+    for _, t in ipairs(cf:IsShown() and gameTabs() or {}) do
+        if t == pps then hookGameTab(t) else list[#list + 1] = t end
+    end
+    local ppsShown = pps and pps:IsShown()
+    if #list == 0 and ppsShown then list[1] = pps; ppsShown = false end
     if #list == 0 then
         for _, t in ipairs(tabs) do t:Hide() end
         GT.Deselect()
@@ -101,13 +149,36 @@ local function layout()
         if not lastTop or top < lastTop then last, lastTop = t, top end
     end
     if not lastTop then last = list[#list] end
+    -- (a page's `visible` can keep its tab away: the Officers tab)
+    local prev = last
     for i = below, #tabs do
         local t = tabs[i]
-        t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", i == below and last or tabs[i - 1], "BOTTOMLEFT", 0, -20)
-        t:Show()
+        local p = ns.UI.pages[t.index]
+        local vis = p and p.guild
+        vis = not (vis and vis.visible) or vis.visible()
+        if vis then
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -20)
+            t:Show()
+            prev = t
+        else
+            t:Hide()
+            if current == t.index then GT.Deselect() end
+        end
+    end
+    if ppsShown then
+        pps:ClearAllPoints()
+        pps:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -20)
     end
     if current then uncheckGameTabs() end
+    -- Back on the guild after another community: the page we were on.
+    if not current and remembered and cf:IsShown() then
+        local want = remembered
+        remembered = nil
+        for _, t in ipairs(tabs) do
+            if t.index == want and t:IsShown() then GT.Select(want) end
+        end
+    end
 end
 
 local function newTab(index, p)
@@ -138,11 +209,11 @@ local function attach()
     -- A quarter wider and taller than the game's 814 x 426, for the roster's
     -- extra and wider columns (RosterLayer.lua) and longer lists here. The
     -- game sets 814 x 426 again on every maximize; we follow it each time.
-    local W, H = 1018, 533
+    -- (only with the guild picked: guildLook puts it back for the others)
     hooksecurefunc(cf, "SetSize", function(_, w, h)
-        if w == 814 and h == 426 then cf:SetSize(W, H) end
+        if w == 814 and h == 426 and GT.GuildPicked() then cf:SetSize(W, H) end
     end)
-    if math.abs(cf:GetWidth() - 814) < 1 and math.abs(cf:GetHeight() - 426) < 1 then cf:SetSize(W, H) end
+    if math.abs(cf:GetWidth() - 814) < 1 and math.abs(cf:GetHeight() - 426) < 1 and GT.GuildPicked() then cf:SetSize(W, H) end
 
     -- The panel our pages draw on: the content area right of the community
     -- list, above everything there: the chat's scroll bar is HIGH strata
@@ -157,7 +228,31 @@ local function attach()
     -- The background the game's own pages sit on (Preferred Play Settings has
     -- none of its own: it shows the window's inset), copied from that inset;
     -- a plain dark one if it can't be read.
+    -- A solid backing under it all: page art with see-through parts (the
+    -- Legacy backgrounds) mustn't show the guild window's own page beneath.
+    -- It's the window's own background (the tiled rock of the game's window
+    -- template, which the Legacy window's art sits on too), so the Legacy art
+    -- looks as it does there; solid dark if that can't be read.
+    local base = overlay:CreateTexture(nil, "BACKGROUND", nil, -8); base:SetAllPoints()
+    local okBase = pcall(function()
+        local src = cf.Bg
+        local tex = src and src.GetTexture and src:GetTexture() or "Interface\\FrameGeneral\\UI-Background-Rock"
+        base:SetTexture(tex, "REPEAT", "REPEAT")
+        base:SetHorizTile(true)
+        base:SetVertTile(true)
+        if src and src.GetVertexColor then base:SetVertexColor(src:GetVertexColor()) end
+    end)
+    if not okBase then base:SetColorTexture(0.03, 0.03, 0.04, 1) end
+    -- (under it, solid dark: the rock may not be fully opaque)
+    local under = overlay:CreateTexture(nil, "BACKGROUND", nil, -8); under:SetAllPoints()
+    under:SetColorTexture(0.03, 0.03, 0.04, 1)
+    under:SetDrawLayer("BACKGROUND", -8)
+    base:SetDrawLayer("BACKGROUND", -7)
     local bg = overlay:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
+    overlay.bg = bg
+    -- (a page can bring its own art instead: `bgAtlas` in its guild opts)
+    function overlay.DefaultBg()
+    bg:SetDesaturated(false); bg:SetTexCoord(0, 1, 0, 1); bg:SetVertexColor(1, 1, 1); bg:SetAlpha(1)
     local okBg = pcall(function()
         local inset = CommunitiesFrameInset or cf.Inset
         local src = inset and inset.Bg
@@ -177,6 +272,8 @@ local function attach()
         bg:SetAlpha(src:GetAlpha())
     end)
     if not okBg then bg:SetColorTexture(0.04, 0.04, 0.05, 0.97) end
+    end
+    overlay.DefaultBg()
     local brand = UI.Text(overlay, "small", UI.GREY, "RIGHT"); brand:SetPoint("BOTTOMRIGHT", -10, 6)
     brand:SetText("Moonwardens")
     overlay:Hide()
@@ -196,16 +293,35 @@ local function attach()
 
     if cf.UpdateCommunitiesTabs then hooksecurefunc(cf, "UpdateCommunitiesTabs", ns.guard(layout, "guild tabs")) end
     if cf.SetDisplayMode then hooksecurefunc(cf, "SetDisplayMode", ns.guard(layout, "guild tabs")) end
+    GT.RosterRock()
     -- The guild window opens on our first tab (Leaderboard), unless the
     -- minimap button or /mw already asked for another page.
     cf:HookScript("OnShow", ns.guard(function()
         layout()
         C_Timer.After(0, ns.guard(function()               -- (once its tabs have positions)
             layout()
-            if not current and tabs[1]:IsShown() then GT.Select(tabs[1].index) end
+            -- First open since login/reload: the Leaderboard. After that, as
+            -- the game does: the page you left it on (the game remembers its
+            -- own; ours we bring back).
+            if not current then
+                if not opened then
+                    if tabs[1]:IsShown() then GT.Select(tabs[1].index) end
+                elseif remembered then
+                    local want = remembered
+                    remembered = nil
+                    for _, t in ipairs(tabs) do
+                        if t.index == want and t:IsShown() then GT.Select(want) end
+                    end
+                end
+            end
+            opened = true
         end, "guild tabs"))
     end, "guild tabs"))
-    cf:HookScript("OnHide", function() GT.Deselect() end)
+    cf:HookScript("OnHide", function()
+        remembered = current
+        GT.Deselect()
+    end)
+    if cf.OnClubSelected then hooksecurefunc(cf, "OnClubSelected", ns.guard(layout, "guild tabs")) end
     attached = true
     if cf:IsShown() then layout() end
     return true
@@ -231,6 +347,46 @@ function GT.Available()
     return attach()
 end
 
+-- The Roster page on the same background as our pages (Leaderboard,
+-- Badges): solid dark, the window's rock, the Legacy Rewards art stretched
+-- over it, on the same area as our page panel. Our own textures, on the
+-- window's inset (under the roster's rows and headers, over its marble);
+-- shown only while the Roster is. Nothing of the game's is changed.
+local ROSTER_ART = "Legacy-Rewards-Tracker-background"
+local rosterBg
+function GT.RosterRock()
+    if rosterBg then return end
+    local cf = CommunitiesFrame
+    local inset = CommunitiesFrameInset or cf.Inset
+    if not (inset and cf.SetDisplayMode and COMMUNITIES_FRAME_DISPLAY_MODES) then return end
+    local function layer(sub)
+        local t = inset:CreateTexture(nil, "BACKGROUND", nil, sub)
+        t:SetPoint("TOPLEFT", cf, "TOPLEFT", LIST_W + 4, -23)
+        t:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", -6, 26)
+        t:Hide()
+        return t
+    end
+    local under = layer(-4); under:SetColorTexture(0.03, 0.03, 0.04, 1)
+    local rock = layer(-3)
+    local src = cf.Bg
+    rock:SetTexture(src and src.GetTexture and src:GetTexture() or "Interface\\FrameGeneral\\UI-Background-Rock", "REPEAT", "REPEAT")
+    rock:SetHorizTile(true); rock:SetVertTile(true)
+    if src and src.GetVertexColor then rock:SetVertexColor(src:GetVertexColor()) end
+    local art = layer(-2)
+    local okArt, res = pcall(art.SetAtlas, art, ROSTER_ART)
+    if not okArt or res == false then art = nil end
+    rosterBg = { under, rock, art }
+    local function apply(mode)
+        local on = mode == COMMUNITIES_FRAME_DISPLAY_MODES.ROSTER and GT.GuildPicked()
+        for _, t in pairs(rosterBg) do t:SetShown(on and true or false) end
+    end
+    hooksecurefunc(cf, "SetDisplayMode", function(_, mode) pcall(apply, mode) end)
+    if cf.OnClubSelected then
+        hooksecurefunc(cf, "OnClubSelected", function() if cf.GetDisplayMode then pcall(apply, cf:GetDisplayMode()) end end)
+    end
+    if cf.GetDisplayMode then pcall(apply, cf:GetDisplayMode()) end
+end
+
 -- Show page `index` on the guild window (which must be open).
 function GT.Select(index)
     local p = ns.UI.pages[index]
@@ -246,6 +402,18 @@ function GT.Select(index)
     end
     current = index
     for _, q in pairs(ns.UI.pages) do if q.gframe then q.gframe:SetShown(q == p) end end
+    local art = p.guild.bgAtlas
+    -- "rock": nothing over the window's rock (the backing above).
+    overlay.bg:SetShown(art ~= "rock")
+    if art == "rock" then art = nil end
+    local okArt, res = false, nil
+    if art then
+        -- (stretched to fit, not tiled: the inset copy left tiling on)
+        overlay.bg:SetHorizTile(false); overlay.bg:SetVertTile(false)
+        okArt, res = pcall(overlay.bg.SetAtlas, overlay.bg, art)
+    end
+    if okArt and res ~= false then overlay.bg:SetVertexColor(1, 1, 1); overlay.bg:SetAlpha(1)
+    else overlay.DefaultBg() end
     overlay:Show()
     for _, t in ipairs(tabs) do t:SetChecked(t.index == index) end
     uncheckGameTabs()
@@ -295,3 +463,32 @@ ns.onLogin(function() if CommunitiesFrame then attach() end end, "guild tabs")
 
 -- For tests.
 function GT.Debug() return tabs, overlay, current end
+
+-- Tabs again now (one's `visible` changed: test mode, rank).
+function GT.Relayout()
+    if attached and CommunitiesFrame and CommunitiesFrame:IsShown() then layout() end
+end
+
+-- /mw bg: our page background next to the Legacy window's, to compare.
+local function describe(label, t)
+    if not t then ns.print(label .. ": not there"); return end
+    local w, h = t:GetSize()
+    local layer, sub = t:GetDrawLayer()
+    local r, g, b, a = t:GetVertexColor()
+    ns.print(("%s: atlas %s, file %s, %dx%d, tile %s/%s, colour %.2f %.2f %.2f %.2f, alpha %.2f (shown %.2f), %s %s, %s"):format(
+        label, tostring(t.GetAtlas and t:GetAtlas()), tostring(t:GetTexture()), w or 0, h or 0,
+        tostring(t:GetHorizTile()), tostring(t:GetVertTile()), r or 0, g or 0, b or 0, a or 0,
+        t:GetAlpha(), t.GetEffectiveAlpha and t:GetEffectiveAlpha() or -1, tostring(layer), tostring(sub),
+        t:IsVisible() and "visible" or "hidden"))
+end
+ns.slash.bg = { help = "compare our page background with the Legacy window's", fn = function()
+    local L = LegacySystemFrame
+    describe("Legacy art", L and L.RewardTrackPage and L.RewardTrackPage.Background)
+    describe("Legacy rock", L and L.Bg)
+    describe("Our art", overlay and overlay.bg)
+    local cf = CommunitiesFrame
+    describe("Guild rock", cf and cf.Bg)
+    local inset = CommunitiesFrameInset or (cf and cf.Inset)
+    describe("Roster art", inset and inset.Bg)
+    if not L then ns.print("Open the Legacy window once, then run this again.") end
+end }

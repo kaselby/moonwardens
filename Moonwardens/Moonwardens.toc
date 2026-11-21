@@ -22,6 +22,12 @@ Compat_OpenMap.lua
 Alert.lua
 UI.lua
 Leaderboard.lua
+Badges.lua
+Ledger.lua
+BadgesUI.lua
+OfficerUI.lua
 GuildTabs.lua
 RosterLayer.lua
 RosterTRP.lua
+GuildInfoStats.lua
+Menu.lua
