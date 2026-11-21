@@ -17,7 +17,7 @@ local LOG_ROW_H = 40
 local NAV = {
     { id = "award", name = "Award Progress" },
     { id = "log", name = "Audit Log" },
-    { id = "approvals", name = "Approvals", soon = true },
+    { id = "approvals", name = "Approvals" },
 }
 
 local state = { view = "award", who = nil, badge = nil, filter = "" }
@@ -154,7 +154,11 @@ local function buildAward(f, parent, w)
         dd:SetupMenu(function(_, root)
             for _, top in ipairs(Badges.CATEGORIES) do
                 for _, c in ipairs(top.children or {}) do
-                    local list = Badges.InCategory(c.id)
+                    local list = {}
+                    for _, b in ipairs(Badges.Grantable(c.id)) do
+                        local past = b.parent and b.month ~= Badges.BOUNTY.month
+                        if not past and ns.Ledger.CanAward(nil, b.id) then list[#list + 1] = b end
+                    end
                     if #list > 0 then
                         root:CreateTitle(top.name .. ": " .. c.name)
                         for _, b in ipairs(list) do
@@ -194,7 +198,7 @@ local function buildAward(f, parent, w)
     a.note:SetMaxLetters(80)
     a.noteHint = K.text(a, "GameFontDisableSmall")
     a.noteHint:SetPoint("TOPLEFT", a.note, "BOTTOMLEFT", -4, -3)
-    a.noteHint:SetText("Why: which patrol, what they did. Everyone can read it in the Audit Log.")
+    a.noteHint:SetText("Why: which patrol, what they did. Needed to remove or revoke. Shown in the Audit Log.")
 
     -- Where they stand, and what this would do.
     a.card = CreateFrame("Frame", nil, a)
@@ -213,16 +217,22 @@ local function buildAward(f, parent, w)
     a.card.after = K.text(a.card, "GameFontNormalSmall")
     a.card.after:SetPoint("TOPLEFT", a.card.bar, "BOTTOMLEFT", -4, -6)
 
-    a.add = CreateFrame("Button", nil, a, "UIPanelButtonTemplate")
-    a.add:SetSize(140, 24)
-    a.add:SetPoint("TOPLEFT", 8, -300)
-    a.add:SetText("Add Progress")
-    a.grant = CreateFrame("Button", nil, a, "UIPanelButtonTemplate")
-    a.grant:SetSize(140, 24)
-    a.grant:SetPoint("LEFT", a.add, "RIGHT", 10, 0)
-    a.grant:SetText("Grant Badge")
+    -- Add / Remove progress, Grant / Revoke the badge. Each asks twice: the
+    -- first click says what it will do, a second within 4 s does it.
+    local bw = math.floor((w - 16 - 3 * 8) / 4)
+    local function button(label, prev)
+        local b = CreateFrame("Button", nil, a, "UIPanelButtonTemplate")
+        b:SetSize(bw, 24)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 8, 0) else b:SetPoint("TOPLEFT", 8, -300) end
+        b:SetText(label)
+        return b
+    end
+    a.add = button("Add Progress")
+    a.remove = button("Remove Progress", a.add)
+    a.grant = button("Grant Badge", a.remove)
+    a.revoke = button("Revoke Badge", a.grant)
     a.result = K.text(a, "GameFontHighlight")
-    a.result:SetPoint("LEFT", a.grant, "RIGHT", 12, 0)
+    a.result:SetPoint("TOPLEFT", a.add, "BOTTOMLEFT", 0, -10)
     a.result:SetPoint("RIGHT", a, "RIGHT", -8, 0)
 
     local function done(e, err)
@@ -236,18 +246,36 @@ local function buildAward(f, parent, w)
         a.confirm = nil
         OUI.Refresh()
     end
-    a.add:SetScript("OnClick", function()
-        done(ns.Ledger.Award(state.who, state.badge, tonumber(a.amount:GetText()) or 0, a.note:GetText()))
-    end)
-    -- Granting outright asks twice.
-    a.grant:SetScript("OnClick", function(self)
-        if a.confirm and GetTime() - a.confirm < 4 then
-            done(ns.Ledger.Award(state.who, state.badge, 0, a.note:GetText()))
-        else
-            a.confirm = GetTime()
-            a.result:SetText("|cffffd100Click again to grant it.|r")
-            C_Timer.After(4, function() if a.confirm and GetTime() - a.confirm >= 4 then a.confirm = nil; OUI.Refresh() end end)
-        end
+    local function twice(btn, ask, act)
+        btn:SetScript("OnClick", function()
+            local c = a.confirm
+            if c and c.btn == btn and GetTime() - c.at < 4 then
+                done(act())
+            else
+                local text = ask()
+                if not text then return end
+                a.confirm = { btn = btn, at = GetTime() }
+                a.result:SetText("|cffffd100" .. text .. " Click again to confirm.|r")
+                C_Timer.After(4, function()
+                    if a.confirm and a.confirm.btn == btn and GetTime() - a.confirm.at >= 4 then a.confirm = nil; OUI.Refresh() end
+                end)
+            end
+        end)
+    end
+    local function amount() return math.max(0, math.floor(tonumber(a.amount:GetText()) or 0)) end
+    local function title() local b = Badges.Get(state.badge); return b and Badges.Title(b) or "" end
+    twice(a.add, function() return ("Add %d to %s's %s?"):format(amount(), K.nameOf(state.who), title()) end,
+        function() return ns.Ledger.Award(state.who, state.badge, amount(), a.note:GetText()) end)
+    twice(a.remove, function() return ("Take %d away from %s's %s?"):format(amount(), K.nameOf(state.who), title()) end,
+        function() return ns.Ledger.Award(state.who, state.badge, -amount(), a.note:GetText()) end)
+    twice(a.grant, function() return ("Grant %s %s?"):format(K.nameOf(state.who), title()) end,
+        function() return ns.Ledger.Award(state.who, state.badge, 0, a.note:GetText()) end)
+    twice(a.revoke, function()
+        return ("Revoke %s from %s (the latest time it was given)?"):format(title(), K.nameOf(state.who))
+    end, function()
+        local e = ns.Ledger.LatestGiving(state.who, state.badge)
+        if not e then return nil, "Nothing to revoke: no grant or claim of it still counts." end
+        return ns.Ledger.Revoke(e.id, a.note:GetText())
     end)
 
     f.award = a
@@ -281,13 +309,17 @@ local function fillAward(f)
     if a.dropdown and a.dropdown.GenerateMenu then pcall(a.dropdown.GenerateMenu, a.dropdown) end
     if a.cycle then a.cycle:SetText(badgeLabel(b)) end
 
-    local manual = b and b.kind == "manual"
+    local manual = b and (b.kind == "manual" or b.kind == "manualweekly")
     if not b then
         a.amountNote:SetText("|cff9d9d9dPick a Patrol badge to add progress.|r")
     elseif manual then
-        a.amountNote:SetText("patrols to add")
+        a.amountNote:SetText("patrols to add or remove")
+    elseif b.kind == "granted" then
+        a.amountNote:SetText("|cff9d9d9dGranted only: use Grant Badge.|r")
+    elseif b.kind == "rank" then
+        a.amountNote:SetText(("|cff9d9d9dComes with the rank of %s; grant it only to fix a mistake.|r"):format(b.rank))
     else
-        a.amountNote:SetText("|cff9d9d9dThe addon counts this one itself; it can only be granted.|r")
+        a.amountNote:SetText("|cff9d9d9dThe addon counts this one itself; it can only be granted or revoked.|r")
     end
 
     local ready = state.who and b
@@ -297,38 +329,88 @@ local function fillAward(f)
         local e = r.badges[b.id]
         K.setBadgeIcon(a.card.icon, b, e.times > 0)
         a.card.title:SetText(("%s - %s"):format(who(state.who), Badges.Title(b)))
-        a.card.bar:Set(e.value, e.goal)
+        if b.kind == "granted" or b.kind == "rank" then
+            a.card.bar:Set(e.times > 0 and 1 or 0, 1, e.times > 0 and ("Earned x%d"):format(e.times) or "Not earned")
+        else
+            a.card.bar:Set(e.value, e.goal)
+        end
         local add = tonumber(a.amount:GetText()) or 0
+        local have = math.max(0, ns.Ledger.ManualFor(state.who).progress[Badges.CounterOf(b)] or 0)
         if manual and add > 0 then
-            local after = math.min(e.goal, e.value + add)
-            a.card.after:SetText(("After this: %s / %s%s"):format(K.commas(after), K.commas(e.goal),
-                (e.times == 0 and after >= e.goal) and "  |cff1eff00- earns the badge|r" or ""))
+            local up, down = have + add, math.max(0, have - add)
+            a.card.after:SetText(("Add: %s / %s%s     Remove: %s / %s%s"):format(
+                K.commas(math.min(up, e.goal)), K.commas(e.goal),
+                (have < e.goal and up >= e.goal) and " |cff1eff00(earns it)|r" or "",
+                K.commas(math.min(down, e.goal)), K.commas(e.goal),
+                (have >= e.goal and down < e.goal) and " |cffff4040(loses it)|r" or ""))
         elseif e.times > 0 then
-            a.card.after:SetText(b.kind == "weekly" and ("Earned %d times."):format(e.times) or "Already earned.")
+            a.card.after:SetText((b.kind == "weekly" or b.stack) and ("Earned %d time%s."):format(e.times, e.times == 1 and "" or "s")
+                or "Already earned.")
         else
             a.card.after:SetText(manual and "Enter how many to add." or "Not earned yet.")
         end
     end
-    a.add:SetEnabled((ready and manual and (tonumber(a.amount:GetText()) or 0) > 0) and true or false)
+    local n = tonumber(a.amount:GetText()) or 0
+    local have = (ready and manual) and (ns.Ledger.ManualFor(state.who).progress[Badges.CounterOf(b)] or 0) or 0
+    a.add:SetEnabled((ready and manual and n > 0) and true or false)
+    a.remove:SetEnabled((ready and manual and n > 0 and have > 0) and true or false)
     a.grant:SetEnabled(ready and true or false)
+    a.revoke:SetEnabled((ready and ns.Ledger.LatestGiving(state.who, b.id)) and true or false)
     if not a.confirm and a.result:GetText() and a.result:GetText():find("Click again") then a.result:SetText("") end
-    return 340
+    return 360
 end
 
 ---------------------------------------------------------------------------
 -- Audit Log
 ---------------------------------------------------------------------------
 local function describe(e)
-    local b = Badges.Get(e.badge)
+    local b = Badges.Get(Badges.Resolve(e))
     local title = b and Badges.Title(b) or e.badge
     local line, meta
+    local function quote(s) return (s and s ~= "") and ("\"" .. s .. "\"") or "No note." end
     if e.kind == "award" then
         if (e.n or 0) > 0 then
             line = ("%s gave %s |cffffffff+%d|r toward %s"):format(who(e.by), who(e.who), e.n, title)
+        elseif (e.n or 0) < 0 then
+            line = ("%s took |cffffffff%d|r from %s's %s"):format(who(e.by), -e.n, who(e.who), title)
         else
             line = ("%s granted %s %s"):format(who(e.by), who(e.who), title)
+            if b and b.level then line = line .. (" (Lv %d)"):format(b.level) end
         end
-        meta = (e.note and e.note ~= "") and ("\"" .. e.note .. "\"") or "No note."
+        meta = quote(e.note)
+        if e.ref then meta = meta .. "  -  from a logged hunt" end
+    elseif e.kind == "request" then
+        if b and b.autoRequest == "rank" then
+            line = ("%s reached the rank of |cffffffff%s|r (asks for %s)"):format(who(e.who), b.rank or "?", Badges.Title(b))
+        else
+            line = ("%s reported a patrol: |cffffffff%s|r"):format(who(e.who), e.value and ns.Dialog.When(e.value) or "time not given")
+        end
+        local d = ns.Ledger.DecisionOf(e.id)
+        if not d then line = line .. "  |cffffd100waiting|r"
+        elseif d.kind == "deny" then line = line .. "  |cffff4040denied|r"
+        else line = line .. "  |cff1eff00approved|r" end
+        meta = ("Reported %s"):format(ns.Dialog.When(e.at))
+            .. (d and ("  -  %s by %s"):format(d.kind == "deny" and "Denied" or "Approved", K.nameOf(d.by)) or "")
+    elseif e.kind == "deny" then
+        local r = ns.Ledger.Find(e.ref)
+        if b and b.autoRequest == "rank" then
+            line = ("%s denied %s's %s badge"):format(who(e.by), who(e.who), Badges.Title(b))
+        else
+            line = ("%s denied %s's patrol of %s"):format(who(e.by), who(e.who), r and r.value and ns.Dialog.When(r.value) or "?")
+        end
+        meta = quote(e.note)
+    elseif e.kind == "hunt" then
+        local t = b and b.target
+        line = ("%s hunted %s%s"):format(who(e.who), t and ("Lv %d %s"):format(b.level, t.name) or "a bounty",
+            (e.n or 0) == 1 and "  |cff1eff00passed|r" or "  |cffff4040failed checks|r")
+        local g = ns.Ledger.GrantFor(e.id)
+        meta = (g and ("Granted by %s.  "):format(K.nameOf(g.by)) or "") .. (e.note or "")
+    elseif e.kind == "revoke" then
+        local t = ns.Ledger.Find(e.ref)
+        local what = not t and "an entry" or t.kind == "claim" and "a claim of"
+            or (t.n or 0) > 0 and ("+%d toward"):format(t.n) or (t.n or 0) < 0 and ("-%d from"):format(-t.n) or "the grant of"
+        line = ("%s revoked %s %s's %s"):format(who(e.by), what, who(e.who), title)
+        meta = quote(e.note) .. (t and ("  -  that entry was " .. date("%m/%d/%y %H:%M", t.at)) or "")
     else
         line = ("%s earned %s%s"):format(who(e.who), title, b and b.kind == "weekly" and (" (x%d)"):format(e.n or 1) or "")
         local bits = { "Claimed by their addon" }
@@ -337,7 +419,12 @@ local function describe(e)
         if e.version and e.version ~= "" then bits[#bits + 1] = "v" .. e.version end
         meta = table.concat(bits, "  -  ")
     end
-    return line, meta, b
+    local rv = e.kind ~= "revoke" and ns.Ledger.RevokeOf(e.id)
+    if rv then
+        line = "|cff9d9d9d" .. line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") .. "|r  |cffff4040REVOKED|r"
+        meta = ("Revoked by %s: %s"):format(K.nameOf(rv.by), (rv.note and rv.note ~= "") and rv.note or "no reason")
+    end
+    return line, meta, b, rv
 end
 
 local function newLogRow(parent)
@@ -360,17 +447,57 @@ local function newLogRow(parent)
     r.meta:SetWordWrap(false)
     r.kind = K.text(r, "GameFontNormalSmall")
     r.kind:SetPoint("BOTTOMRIGHT", -10, 5)
+    r.revoke = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    r.revoke:SetSize(64, 18)
+    r.revoke:SetPoint("RIGHT", -8, 0)
+    r.revoke:SetText("Revoke")
+    r.revoke:SetScript("OnClick", function(self)
+        local e = self:GetParent().event
+        if not e then return end
+        local line = describe(e)
+        line = (line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+        if e.kind == "hunt" then
+            OUI.AskGrantHunt(e.id, line)
+        elseif e.kind == "request" then
+            -- (approving is one click; the award it makes can be revoked)
+            local ok, err = ns.Ledger.Approve(e.id)
+            if not ok then ns.print("|cffff4040" .. (err or "Not approved.") .. "|r") end
+        else
+            OUI.AskRevoke(e.id, line)
+        end
+    end)
+    r.deny = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    r.deny:SetSize(64, 18)
+    r.deny:SetPoint("RIGHT", r.revoke, "LEFT", -4, 0)
+    r.deny:SetText("Deny")
+    r.deny:SetScript("OnClick", function(self)
+        local e = self:GetParent().event
+        if not e then return end
+        local line = describe(e)
+        OUI.AskDeny(e.id, (line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")))
+    end)
+    r.deny:Hide()
+    -- (with the buttons there, the time and tag sit left of them)
+    function r:Place(buttons)
+        local x = -(12 + buttons * 68)
+        self.when:ClearAllPoints(); self.when:SetPoint("TOPRIGHT", x, -6)
+        self.kind:ClearAllPoints(); self.kind:SetPoint("BOTTOMRIGHT", x, 5)
+    end
+    r:Place(1)
+    r.meta:SetPoint("RIGHT", r.kind, "LEFT", -8, 0)
     return r
 end
 
-local function fillLog(f)
+local function fillLog(f, approvals)
     local child = f.scroll.child
     -- Filtering ranks as the Guildie suggestions do: events with someone
     -- whose first name starts with it (guildie or officer), newest first;
     -- then last names / RP names; then badge names and notes that have it.
-    local q = trim(state.filter)
+    local q = approvals and "" or trim(state.filter)
     local list
-    if q == "" then
+    if approvals then
+        list = ns.Ledger.Pending()
+    elseif q == "" then
         list = ns.Ledger.Events()
     else
         local tiers = { {}, {}, {} }
@@ -386,7 +513,8 @@ local function fillLog(f)
         list = {}
         for _, tl in ipairs(tiers) do for _, e in ipairs(tl) do list[#list + 1] = e end end
     end
-    f.logHead:SetText(("Audit Log  |cff9d9d9d%d event%s|r"):format(#list, #list == 1 and "" or "s"))
+    f.logHead:SetText(approvals and ("Approvals  |cff9d9d9d%d waiting|r"):format(#list)
+        or ("Audit Log  |cff9d9d9d%d event%s|r"):format(#list, #list == 1 and "" or "s"))
     local y = 32
     for i, e in ipairs(list) do
         local r = f.logRows[i]
@@ -394,18 +522,34 @@ local function fillLog(f)
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
         r:SetPoint("RIGHT", child, "RIGHT", 0, 0)
-        local line, meta, b = describe(e)
-        if b then K.setBadgeIcon(r.icon, b, true) end
+        local line, meta, b, rv = describe(e)
+        r.event = e
+        local pending = e.kind == "request" and not ns.Ledger.DecisionOf(e.id) and ns.Ledger.CanAward(nil, e.badge)
+        r.deny:SetShown(pending and true or false)
+        r:Place(pending and 2 or 1)
+        if e.kind == "request" then
+            r.revoke:SetText("Approve")
+            r.revoke:SetShown(pending and true or false)
+        elseif e.kind == "hunt" then
+            r.revoke:SetText("Grant")
+            r.revoke:SetShown((ns.Ledger.CanAward(nil, Badges.Resolve(e)) and not ns.Ledger.GrantFor(e.id)) and true or false)
+        else
+            r.revoke:SetText("Revoke")
+            r.revoke:SetShown(ns.Ledger.CanRevoke(e) and true or false)
+        end
+        if b then K.setBadgeIcon(r.icon, b, not rv and e.kind ~= "revoke") end
         r.line:SetText(line)
         r.meta:SetText(meta)
         r.when:SetText(date("%m/%d/%y %H:%M", e.at))
-        r.kind:SetText(e.test and "|cffff8040Test|r" or e.kind == "award" and "|cffffd100Officer|r" or "|cff9d9d9dAutomatic|r")
+        r.kind:SetText(e.test and "|cffff8040Test|r" or (e.kind == "award" or e.kind == "revoke") and "|cffffd100Granter|r"
+            or e.kind == "hunt" and "|cff40c0ffHunt|r" or e.kind == "request" and "|cffffd100Request|r"
+            or e.kind == "deny" and "|cffffd100Granter|r" or "|cff9d9d9dAutomatic|r")
         r:Show()
         y = y + LOG_ROW_H
     end
     for i = #list + 1, #f.logRows do f.logRows[i]:Hide() end
     f.logEmpty:SetShown(#list == 0)
-    f.logEmpty:SetText(q ~= "" and "Nothing matches." or "Nothing logged yet.")
+    f.logEmpty:SetText(approvals and "Nothing waiting for approval." or q ~= "" and "Nothing matches." or "Nothing logged yet.")
     return math.max(y, 80)
 end
 
@@ -476,14 +620,20 @@ end
 
 local function refresh(f)
     page = f
-    for i, c in ipairs(NAV) do K.styleCatButton(f.nav[i], c, false, state.view == c.id) end
+    for i, c in ipairs(NAV) do
+        K.styleCatButton(f.nav[i], c, false, state.view == c.id)
+        if c.id == "approvals" then
+            local n = #ns.Ledger.Pending()
+            if n > 0 then f.nav[i].label:SetText(("Approvals |cffffffff(%d)|r"):format(n)) end
+        end
+    end
     local h
-    local isLog = state.view == "log"
+    local isLog = state.view == "log" or state.view == "approvals"
     f.award:SetShown(not isLog)
     f.logHead:SetShown(isLog)
-    f.logFilter:SetShown(isLog)
+    f.logFilter:SetShown(state.view == "log")
     if isLog then
-        h = fillLog(f)
+        h = fillLog(f, state.view == "approvals")
     else
         for _, r in ipairs(f.logRows) do r:Hide() end
         f.logEmpty:Hide()
@@ -504,11 +654,7 @@ function OUI.Open(key)
     if ns.db then ns.db.officerUI = ns.db.officerUI or {}; ns.db.officerUI.view = "award" end
     state.who = key
     if page and page.award then page.award.name:SetText(key and K.nameOf(key) or "") end
-    if ns.GuildTabs and ns.GuildTabs.Available() and CommunitiesFrame and CommunitiesFrame:IsShown() then
-        ns.GuildTabs.Select(6)
-    else
-        ns.ToggleWindow(6)
-    end
+    ns.ToggleWindow(6)          -- (switches tab if the guild window is open; else it opens there on J)
     OUI.Refresh()
 end
 
@@ -516,6 +662,49 @@ UI.AddPage(6, "Officers", build, refresh,
     { order = 3, icon = { "INV_Misc_Note_06", "INV_Scroll_03" }, tooltip = "Officers",
       bgAtlas = "Legacy-Rewards-Tracker-background",
       visible = function() return ns.Ledger and ns.Ledger.CanAward() end })
+
+-- The Audit Log's questions, in our own dialog (Dialog.lua), never the
+-- game's StaticPopup.
+local function failed(err, what) ns.print("|cffff4040" .. (err or what) .. "|r") end
+
+-- Revoking: the reason typed in.
+function OUI.AskRevoke(id, line)
+    ns.Dialog.Show({
+        text = ("Revoke this entry?\n\n%s\n\nThe reason goes in the Audit Log:"):format(line),
+        accept = "Revoke", edit = true, maxLetters = 80,
+        onAccept = function(typed)
+            local ok, err = ns.Ledger.Revoke(id, typed)
+            if not ok then failed(err, "Not revoked.") end
+        end,
+    })
+end
+
+function OUI.AskDeny(id, line)
+    ns.Dialog.Show({
+        text = ("Deny this request?\n\n%s\n\nThe reason goes in the Audit Log:"):format(line),
+        accept = "Deny", edit = true, maxLetters = 80,
+        onAccept = function(typed)
+            local ok, err = ns.Ledger.Deny(id, typed)
+            if not ok then failed(err, "Not denied.") end
+        end,
+    })
+end
+
+-- Granting Bounty Hunter from a logged hunt: to its hunter, for its bounty.
+function OUI.AskGrantHunt(id, line)
+    ns.Dialog.Show({
+        text = ("Grant this bounty for this hunt?\n\n%s"):format(line),
+        accept = "Grant",
+        onAccept = function()
+            local h = ns.Ledger.Find(id)
+            if not h then return end
+            local bid = Badges.Resolve(h)
+            local b = Badges.Get(bid)
+            local ok, err = ns.Ledger.Award(h.who, bid, 0, b and ("Hunt of " .. ns.Dialog.When(h.at)) or "Bounty", { ref = h.id })
+            if not ok then failed(err, "Not granted.") end
+        end,
+    })
+end
 
 ns.onLogin(function()
     ns.listen("LEDGER", function() OUI.Refresh() end)

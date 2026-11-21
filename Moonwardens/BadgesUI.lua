@@ -12,7 +12,7 @@ local Badges = ns.Badges
 local BUI = {}
 ns.BadgesUI = BUI
 
-local CARD_H = 112
+local CARD_H = 120
 local CARD_GAP = 5
 local CAT_H = 25
 local SCROLL_STEP = 40
@@ -25,7 +25,7 @@ local saved
 local function loadSaved()
     if saved or not ns.db then return end
     local sv = ns.db.badgeUI or {}
-    saved = { cat = sv.cat or "overview", collapsed = sv.collapsed or {}, scroll = sv.scroll or {} }
+    saved = { cat = sv.cat or "overview", collapsed = sv.collapsed or {}, scroll = sv.scroll or {}, open = sv.open or {}, shut = sv.shut or {} }
     ns.db.badgeUI = saved
     state.cat = saved.cat
     state.collapsed = saved.collapsed
@@ -86,12 +86,14 @@ end
 -- The badge tooltip: title, what it takes, how it stands.
 local function badgeTooltip(owner, b, e)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-    local c = Badges.TIER_COLOR[b.tier]
+    local c = Badges.TIER_COLOR[b.tier] or { 1, 0.82, 0 }
     GameTooltip:AddLine(Badges.Title(b), c[1], c[2], c[3])
     GameTooltip:AddLine(b.desc, 1, 1, 1, true)
     GameTooltip:AddLine(" ")
-    if e.times > 0 then
-        if b.kind == "weekly" then
+    if b.kind == "parent" then
+        -- (a container: its children say what's earned)
+    elseif e.times > 0 then
+        if b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack then
             GameTooltip:AddLine(("Earned %d time%s, last in the week of %s"):format(e.times, e.times == 1 and "" or "s",
                 Badges.WeekDate(e.last)), 0.12, 1, 0)
         else
@@ -103,10 +105,27 @@ local function badgeTooltip(owner, b, e)
     if b.kind == "weekly" then
         GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
         GameTooltip:AddLine("Can be earned again: every 500 kills in a week is a full Copper, Silver and Gold.", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "manualweekly" then
+        GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
+        GameTooltip:AddLine("Can be earned again each week. Report your patrols for an officer to approve.", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "placement" then
+        GameTooltip:AddLine("Can be earned again each week. Ties share the place.", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "granted" then
+        GameTooltip:AddLine("Granted by " .. Badges.Granters(b) .. ".", 1, 0.82, 0, true)
+        if b.stack then GameTooltip:AddLine("Can be earned again.", 0.62, 0.62, 0.62) end
+        if b.level then GameTooltip:AddLine(("Nobody in your party may be above level %d."):format(b.level), 0.62, 0.62, 0.62, true) end
+    elseif b.kind == "parent" then
+        GameTooltip:AddLine(("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0)
+        GameTooltip:AddLine("Each is a badge of its own, worth its own points.", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "rank" then
+        GameTooltip:AddLine(("Comes with the rank of %s, or any above it."):format(b.rank), 1, 0.82, 0, true)
     else
         GameTooltip:AddLine(("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
     end
-    GameTooltip:AddLine(("Worth %d points%s"):format(b.points, b.kind == "weekly" and " each time" or ""), 0.62, 0.62, 0.62)
+    local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack
+    if b.kind ~= "parent" then
+        GameTooltip:AddLine(("Worth %d points%s"):format(b.points, again and " each time" or ""), 0.62, 0.62, 0.62)
+    end
     GameTooltip:Show()
 end
 
@@ -145,8 +164,10 @@ local function setBadgeIcon(icon, b, earned)
     setIcon(icon.tex, b.icon)
     icon.tex:SetDesaturated(not earned)
     icon.tex:SetAlpha(earned and 1 or 0.75)
-    icon.coin:SetTexture(Badges.COIN[b.tier])
-    icon.coin:SetDesaturated(not earned)
+    icon.coin:SetShown(b.tier and true or false)
+    if b.tier then
+        icon.coin:SetTexture(Badges.COIN[b.tier])   -- (full colour, earned or not)
+    end
 end
 
 -- A Legacy progress bar: dark track, fill, frame, "n / goal".
@@ -185,7 +206,7 @@ local function newBar(parent, height)
 end
 
 -- The points shield (Legacy-Tree-Frame-Points-Icon) with a number on it.
-local function newShield(parent, scale)
+local function newShield(parent, scale, fontName)
     scale = scale or 1
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(35 * scale, 51 * scale)
@@ -193,9 +214,13 @@ local function newShield(parent, scale)
     f.icon:SetAllPoints()
     if not atlas(f.icon, "Legacy-Tree-Frame-Points-Icon") then f.icon:SetTexture("Interface\\AchievementFrame\\UI-Achievement-Shields") end
     f.points = f:CreateFontString(nil, "OVERLAY")
-    font(f.points, scale > 1.2 and "GameFontNormalHuge" or "GameFontNormalMed3", "GameFontNormal")
+    font(f.points, fontName or (scale > 1.2 and "GameFontNormalHuge" or "GameFontNormalMed3"), "GameFontNormal")
     f.points:SetTextColor(1, 1, 1)
-    f.points:SetPoint("CENTER", -1 * scale, -4 * scale)
+    -- (a set width, centred: one digit sits as centred as two)
+    f.points:SetWidth(70 * scale)          -- (room for a score of thousands, still centred)
+    f.points:SetJustifyH("CENTER")
+    f.points:SetWordWrap(false)
+    f.points:SetPoint("CENTER", 0, -4 * scale)
     return f
 end
 
@@ -393,8 +418,48 @@ local function newCard(parent)
     c.desc:SetPoint("RIGHT", c, "RIGHT", -70, 0)
     c.desc:SetJustifyV("TOP")
     c.progress = newBar(c, 16)
-    c.progress:SetPoint("BOTTOMLEFT", 84, 16)
-    c.progress:SetPoint("BOTTOMRIGHT", -70, 16)
+    c.progress:SetPoint("TOPLEFT", 84, -(CARD_H - 28))
+    c.progress:SetPoint("TOPRIGHT", -70, -(CARD_H - 28))
+    -- (granted and rank badges: who gives it, in place of the bar)
+    c.info = text(c, "GameFontNormalSmall")
+    c.info:SetPoint("TOPLEFT", 84, -(CARD_H - 30))
+    c.info:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+    -- A parent's children, listed under it (as Explore Azeroth's are); the
+    -- parent folds them away with a click, Legacy's +/- showing which.
+    c.plus = c:CreateTexture(nil, "OVERLAY")
+    c.plus:SetSize(20, 20)
+    c.plus:SetPoint("TOPLEFT", 76, -(CARD_H - 32))
+    c.listHead = text(c, "GameFontNormal")
+    c.listHead:SetPoint("TOPLEFT", 24, -(CARD_H - 4))
+    c.rows = {}
+    -- Tall cards: Legacy's tiled top, middle and bottom.
+    c.bgTop = c:CreateTexture(nil, "BACKGROUND"); c.bgTop:SetPoint("TOPLEFT"); c.bgTop:SetPoint("TOPRIGHT")
+    c.bgBot = c:CreateTexture(nil, "BACKGROUND"); c.bgBot:SetPoint("BOTTOMLEFT"); c.bgBot:SetPoint("BOTTOMRIGHT")
+    c.bgMid = c:CreateTexture(nil, "BACKGROUND", nil, -1)
+    -- Badges asked for (patrols): report one, for the officers to approve.
+    c.report = CreateFrame("Button", nil, c, "UIPanelButtonTemplate")
+    c.report:SetSize(120, 20)
+    c.report:SetPoint("BOTTOMRIGHT", -12, 10)
+    c.report:SetScript("OnClick", function(self)
+        local b = self:GetParent().badge
+        if b then BUI.AskReport(b) end
+    end)
+    c.report:Hide()
+    -- Picked out for a moment when a link leads here (BUI.Focus).
+    c.sel = c:CreateTexture(nil, "BORDER")
+    c.sel:SetAllPoints()
+    if not atlas(c.sel, "Legacy-Challenge-Cards-selected") then c.sel:SetColorTexture(1, 0.82, 0, 0.15) end
+    c.sel:Hide()
+    -- A child's card leads to its parent.
+    c:SetScript("OnClick", function(self)
+        local b = self.badge
+        if b and b.parent then BUI.Focus(b.parent)
+        elseif b and b.kind == "parent" and saved then
+            PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+            saved.shut[b.id] = not saved.shut[b.id] or nil
+            BUI.Refresh()
+        end
+    end)
     c.shield = newShield(c)
     c.shield:SetPoint("TOPRIGHT", -14, -26)
     c.dateBg = c:CreateTexture(nil, "OVERLAY")
@@ -411,48 +476,217 @@ local function newCard(parent)
     return c
 end
 
-local function fillCard(c, b, e)
-    c.badge, c.entry = b, e
-    local earned = e.times > 0
-    if not atlas(c.bg, earned and "Legacy-Challenge-Cards" or "Legacy-Challenge-Cards-Disable") then
+-- One criterion: a Legacy bar with its name, and a check once done.
+local CRIT_H, CRIT_GAP = 30, 5
+local function newCriterion(parent)
+    local r = CreateFrame("Frame", nil, parent)
+    r:SetHeight(CRIT_H)
+    r.bg = r:CreateTexture(nil, "BORDER"); r.bg:SetAllPoints()
+    if not atlas(r.bg, "Legacy-Challenge-Cards-Bar") then r.bg:SetColorTexture(0.15, 0.12, 0.08, 0.8) end
+    r.icon = newIcon(r, 24)
+    r.icon:SetPoint("LEFT", 4, 0)
+    r.shield = newShield(r, 0.55, "GameFontHighlightSmall")
+    r.shield:SetPoint("RIGHT", -26, -1)
+    r.points = r.shield.points
+    r.name = text(r, "SystemFont_Small2", "ARTWORK")
+    r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+    r.name:SetPoint("RIGHT", r.shield, "LEFT", -4, 0)
+    r.name:SetWordWrap(false)
+    r.check = r:CreateTexture(nil, "ARTWORK")
+    if not atlas(r.check, "worldquest-tracker-checkmark", true) then r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready") end
+    r.check:SetSize(16, 16)
+    r.check:SetPoint("RIGHT", -6, 0)
+    r:EnableMouse(true)
+    r:SetScript("OnEnter", function(self)
+        if self.badge then badgeTooltip(self, self.badge, self.entry); return end
+        if not self.target then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(("Level %d: %s"):format(self.target.level, self.target.name), 1, 0.82, 0)
+        if self.target.more then GameTooltip:AddLine(self.target.name .. " " .. self.target.more, 1, 1, 1, true) end
+        GameTooltip:AddLine(("Nobody in your party may be above level %d."):format(self.target.level), 0.62, 0.62, 0.62, true)
+        GameTooltip:AddLine(self.done and "Done this month." or "Not done this month.", self.done and 0.12 or 0.62, self.done and 1 or 0.62, self.done and 0 or 0.62)
+        GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return r
+end
+
+-- The card's background: one piece, or the tiled one when it's tall.
+local function cardArt(c, earned, tall)
+    local v = earned and "" or "-Disable"
+    local okTall = tall and atlas(c.bgTop, "Legacy-Challenge-Cards-tiled-top" .. v, true)
+        and atlas(c.bgBot, "Legacy-Challenge-Cards-tiled-bottom" .. v, true)
+        and atlas(c.bgMid, "Legacy-Challenge-Cards-tiled-vertical" .. v, true)
+    if okTall then
+        -- As Legacy Challenges' own tall cards (Blizzard_LegacySystemTemplates):
+        -- the middle at its atlas size, then stretched over the whole card 10
+        -- in from top and bottom, under the top and bottom pieces; tiled
+        -- downward, set after the atlas (which resets the wrap).
+        c.bgMid:ClearAllPoints()
+        c.bgMid:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -10)
+        c.bgMid:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 10)
+        c.bgMid:SetHorizTile(false)
+        c.bgMid:SetVertTile(true)
+    end
+    c.bgTop:SetShown(okTall and true or false)
+    c.bgBot:SetShown(okTall and true or false)
+    c.bgMid:SetShown(okTall and true or false)
+    c.bg:SetShown(not okTall)
+    if not okTall and not atlas(c.bg, earned and "Legacy-Challenge-Cards" or "Legacy-Challenge-Cards-Disable") then
         c.bg:SetColorTexture(0.12, 0.1, 0.07, earned and 0.95 or 0.7)
     end
-    if not atlas(c.ribbon, earned and "Legacy-Challenge-Cards-Ribbon-Brown" or "Legacy-Challenge-Cards-Ribbon-Brown-Disable", true) then
+end
+
+-- Returns the card's height. A "parent" (any compound badge, made with
+-- Badges.Compound - see the template's rules in Badges.lua) is drawn here
+-- the one way for all of them: tall Legacy card, its children as rows,
+-- folding with a click. Keep it generic: nothing here may be about one
+-- particular compound badge.
+local function fillCard(c, b, e, key, result)
+    c.badge, c.entry = b, e
+    local earned = e.times > 0
+    -- A month's Bounty Hunter card isn't greyed out while its month is
+    -- running: it's there to be hunted. Once the month is over, it's grey
+    -- only if none of its bounties were completed. (Its check and date still
+    -- wait for all of them.)
+    local lit = earned
+    if b.kind == "parent" then lit = b.active or (e.value or 0) > 0 end
+    local kids = b.kind == "parent" and b.children or {}
+    local open = #kids > 0 and not (saved and saved.shut[b.id])
+    local rows = math.ceil(#kids / 2)
+    local h = CARD_H + (open and (26 + rows * (CRIT_H + CRIT_GAP)) or 0)
+    c:SetHeight(h)
+    cardArt(c, lit, open)
+    if not atlas(c.ribbon, lit and "Legacy-Challenge-Cards-Ribbon-Brown" or "Legacy-Challenge-Cards-Ribbon-Brown-Disable", true) then
         c.ribbon:SetHeight(40)
         c.ribbon:SetColorTexture(0.3, 0.2, 0.1, 0.8)
     end
-    setBadgeIcon(c.icon, b, earned)
+    setBadgeIcon(c.icon, b, lit)
     c.title:SetText(Badges.Title(b))
-    c.title:SetTextColor(earned and 1 or 0.62, earned and 1 or 0.62, earned and 1 or 0.62)
-    c.coin:SetTexture(Badges.COIN[b.tier])
-    c.coin:SetDesaturated(not earned)
+    c.title:SetTextColor(lit and 1 or 0.62, lit and 1 or 0.62, lit and 1 or 0.62)
+    c.coin:Hide()                                    -- (the tier shows on the icon's corner only)
+    c.times:ClearAllPoints()
+    c.times:SetPoint("LEFT", c.title, "RIGHT", 6, 0)
     -- Re-earnable ones say how often; one-time ones don't.
-    if b.kind == "weekly" and e.times > 0 then
+    if (b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack) and e.times > 0 then
         c.times:SetText("x" .. e.times); c.times:Show()
     else
         c.times:Hide()
     end
     c.desc:SetText(b.desc)
-    c.desc:SetTextColor(earned and 1 or 0.7, earned and 1 or 0.7, earned and 1 or 0.7)
-    if b.kind == "weekly" then
+    c.desc:SetTextColor(lit and 1 or 0.7, lit and 1 or 0.7, lit and 1 or 0.7)
+    local plain = b.kind == "granted" or b.kind == "rank"
+    c.progress:SetShown(not plain)
+    c.info:SetShown(plain)
+    if b.kind == "parent" then
+        c.progress:Set(e.value, e.goal, ("Bounties: %d / %d"):format(e.value or 0, e.goal or 0))
+    elseif b.kind == "weekly" or b.kind == "manualweekly" then
         c.progress:Set(e.value, e.goal, ("This week: %s / %s"):format(commas(e.value), commas(e.goal)))
+    elseif b.kind == "placement" then
+        c.progress:SetShown(false)
+        c.info:SetShown(true)
+        c.info:SetText("Claimed a day after the weekly reset, from last week's final standings.")
+    elseif plain then
+        local part = b.parent and Badges.Get(b.parent)
+        local text = b.kind == "rank" and ("Comes with the rank of %s."):format(b.rank)
+            or ("Granted by %s.%s"):format(Badges.Granters(b), part and ("  |cff9d9d9dPart of %s.|r"):format(part.name) or "")
+        if b.autoRequest == "rank" and e.times == 0 then
+            -- (mine, waiting: say so)
+            local waiting = false
+            if not key and ns.Ledger then
+                for _, r in ipairs(ns.Ledger.Pending()) do if r.who == ns.meKey and r.badge == b.id then waiting = true end end
+            end
+            text = waiting and ("|cffffd100Waiting for an officer to approve your rank of %s.|r"):format(b.rank)
+                or ("Requested when you reach the rank of %s; an officer approves it."):format(b.rank)
+        end
+        c.info:SetText(text)
     else
-        c.progress:Set(e.value, e.goal)
+        -- (mine: how many reported and still waiting for an officer)
+        local waiting = 0
+        if b.requestable and not key and ns.Ledger then
+            for _, r in ipairs(ns.Ledger.Pending()) do
+                if r.who == ns.meKey and Badges.CounterOf(Badges.Get(r.badge)) == Badges.CounterOf(b) then waiting = waiting + (r.n or 1) end
+            end
+        end
+        c.progress:Set(e.value, e.goal, waiting > 0 and ("%s / %s  (%d waiting)"):format(commas(e.value), commas(e.goal), waiting) or nil)
     end
-    c.shield.points:SetText(b.points)
-    c.shield.icon:SetDesaturated(not earned)
+    local canReport = b.requestable and not key
+    c.report:SetShown(canReport and true or false)
+    if canReport then c.report:SetText("Report a " .. (b.unit or "Patrol"):gsub("^%l", string.upper)) end
+    c.progress:SetPoint("TOPRIGHT", canReport and -140 or -70, -(CARD_H - 28))
+    c.progress:SetPoint("TOPLEFT", #kids > 0 and 104 or 84, -(CARD_H - 28))   -- (room for a parent's +/-)
+
+    -- A parent's children: two columns of rows, each a badge of its own
+    -- (icon, level and name, points, a check once earned; its own tooltip).
+    c.listHead:SetShown(open)
+    c.plus:SetShown(#kids > 0)
+    if #kids > 0 and not atlas(c.plus, open and "128-redbutton-minus" or "128-redbutton-plus") then
+        c.plus:SetTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
+    end
+    if open then
+        local first = kids[1] and Badges.Get(kids[1])
+        -- ("N points each" only when every child is worth the same)
+        local same = first ~= nil
+        for _, cid in ipairs(kids) do
+            local k = Badges.Get(cid)
+            if not (k and first and k.points == first.points) then same = false end
+        end
+        c.listHead:SetText(same and ("%s - %d points each"):format(b.listLabel or "Includes", first.points)
+            or (b.listLabel or "Includes"))
+    end
+    local w = (c:GetWidth() > 0 and c:GetWidth() or 500)
+    local cw = math.floor((w - 40 - 10) / 2)
+    local shown = open and kids or {}          -- (folded: no rows at all)
+    for i = 1, math.max(#shown, #c.rows) do
+        local cid, r = shown[i], c.rows[i]
+        local child = cid and Badges.Get(cid)
+        if child then
+            if not r then r = newCriterion(c); c.rows[i] = r end
+            local ce = result and result.badges[cid] or { times = 0 }
+            r.badge, r.entry, r.target = child, ce, child.target
+            r.done = ce.times > 0
+            r:SetWidth(cw)
+            r:ClearAllPoints()
+            local row, col = math.floor((i - 1) / 2), (i - 1) % 2
+            r:SetPoint("TOPLEFT", c, "TOPLEFT", 20 + col * (cw + 10), -(CARD_H + 22 + row * (CRIT_H + CRIT_GAP)))
+            setBadgeIcon(r.icon, child, r.done)
+            r.name:SetText(child.label or child.name)
+            r.name:SetTextColor(r.done and 1 or 0.75, r.done and 1 or 0.75, r.done and 1 or 0.75)
+            r.points:SetText(child.points)
+            r.shield.icon:SetDesaturated(not r.done)
+            r.check:SetShown(r.done)
+            r:Show()
+        elseif r then
+            r:Hide()
+        end
+    end
+    c.info:ClearAllPoints()
+    c.info:SetPoint("TOPLEFT", 84, -(CARD_H - 30))
+    c.info:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+    -- (a parent's shield: the points its children have earned)
+    c.shield.points:SetText(b.kind == "parent" and (e.childPoints or 0) or b.points)
+    c.shield.icon:SetDesaturated(not lit)
     c.dateBg:SetShown(earned)
     c.check:SetShown(earned)
     c.date:SetShown(earned)
     if earned then c.date:SetText(Badges.WeekDate(e.last)) end
+    return h
 end
 
 local function searchHits(result)
     local q = state.search:lower()
     local list = {}
     for _, b in ipairs(Badges.LIST) do
-        local hay = (Badges.Title(b) .. " " .. b.desc .. " " .. b.kind .. " " .. b.cat):lower()
+      if not b.parent then                    -- (a child is found through its parent's card)
+        local hay = Badges.Title(b) .. " " .. b.desc .. " " .. b.kind .. " " .. b.cat
+        for _, cid in ipairs(b.children or {}) do
+            local child = Badges.Get(cid)
+            if child then hay = hay .. " " .. child.name .. " " .. child.desc end
+        end
+        for _, n in ipairs(b.target and b.target.names or {}) do hay = hay .. " " .. n end
+        hay = hay:lower()
         if hay:find(q, 1, true) then list[#list + 1] = b end
+      end
     end
     return list
 end
@@ -460,15 +694,18 @@ end
 local function showCards(f, list, result)
     local child = f.scroll.child
     local y = 0
+    f.cardY, f.cardOf = {}, {}
     for i, b in ipairs(list) do
         local c = f.cards[i]
         if not c then c = newCard(child); f.cards[i] = c end
         c:ClearAllPoints()
         c:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
         c:SetPoint("RIGHT", child, "RIGHT", 0, 0)
-        fillCard(c, b, result.badges[b.id])
+        local h = fillCard(c, b, result.badges[b.id], state.view, result)
+        c.sel:Hide()
+        f.cardY[b.id], f.cardOf[b.id] = y, c
         c:Show()
-        y = y + CARD_H + CARD_GAP
+        y = y + h + CARD_GAP
     end
     for i = #list + 1, #f.cards do f.cards[i]:Hide() end
     return y
@@ -514,7 +751,7 @@ local function buildOverview(f, parent, w)
         t.times:SetPoint("TOPRIGHT", t.icon, "TOPRIGHT", 6, 4)
         t:SetScript("OnEnter", function(self) if self.badge then badgeTooltip(self, self.badge, self.entry) end end)
         t:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        t:SetScript("OnClick", function(self) if self.badge then selectCat(self.badge.cat) end end)
+        t:SetScript("OnClick", function(self) if self.badge then BUI.Focus(self.badge.parent or self.badge.id) end end)
         o.tiles[i] = t
     end
     o.prestigeEmpty = text(o, "GameFontDisable")
@@ -540,7 +777,7 @@ local function buildOverview(f, parent, w)
         r.points:SetPoint("RIGHT", r.date, "LEFT", -14, 0)
         r:SetScript("OnEnter", function(self) if self.badge then badgeTooltip(self, self.badge, self.entry) end end)
         r:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        r:SetScript("OnClick", function(self) if self.badge then selectCat(self.badge.cat) end end)
+        r:SetScript("OnClick", function(self) if self.badge then BUI.Focus(self.badge.parent or self.badge.id) end end)
         o.recent[i] = r
     end
     o.recentEmpty = text(o, "GameFontDisable")
@@ -786,6 +1023,23 @@ function BUI.Refresh()
     if page and page:IsVisible() then refresh(page) end
 end
 
+-- Go to a badge's card (its category, scrolled to it) and pick it out.
+function BUI.Focus(id)
+    local b = Badges.Get(id)
+    if not (b and page) then return end
+    PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+    state.cat = b.cat
+    if saved and not state.view then saved.cat = b.cat end
+    if page.search and page.search:GetText() ~= "" then page.search:SetText(""); state.search = "" end
+    refresh(page)
+    local y, c = page.cardY and page.cardY[id], page.cardOf and page.cardOf[id]
+    if y then page.scroll:ScrollTo(y - 6) end
+    if c then
+        c.sel:Show()
+        C_Timer.After(1.5, function() if c.badge == b then c.sel:Hide() end end)
+    end
+end
+
 -- Open someone's badges (nil or me: mine) on the Stats tab.
 function Badges.View(key)
     if key == ns.meKey then key = nil end
@@ -797,11 +1051,7 @@ function Badges.View(key)
     if page and page.search then page.search:SetText("") end
     if key then Badges.Request(key) end
     if ns.ToggleWindow then
-        if ns.GuildTabs and ns.GuildTabs.Available() and CommunitiesFrame and CommunitiesFrame:IsShown() then
-            ns.GuildTabs.Select(1)
-        else
-            ns.ToggleWindow(1)
-        end
+        ns.ToggleWindow(1)      -- (switches tab if the guild window is open; else it opens there on J)
     end
     BUI.Refresh()
 end
@@ -815,6 +1065,20 @@ ns.onLogin(function()
     ns.listen("LEDGER", function() BUI.Refresh() end)     -- (an officer's award)
 end, "badges ui")
 
+-- Reporting a patrol: a note for the officers, then it waits for them. (Our
+-- own dialog, Dialog.lua, never the game's StaticPopup.)
+function BUI.AskReport(b)
+    ns.Dialog.Show({
+        text = "Report a patrol for the officers to approve.\n\nWhen did it start?",
+        accept = "Report", when = true,
+        onAccept = function(_, when)
+            local ok, err = ns.Ledger.Request(b.id, when)
+            if not ok then return false, err or "Not reported." end   -- (the box stays, saying why)
+            ns.print(("Patrol of %s reported. It's waiting for an officer to approve it."):format(ns.Dialog.When(when)))
+        end,
+    })
+end
+
 -- The Legacy-art pieces, for the Officers tab (OfficerUI.lua).
 BUI.Kit = {
     font = font, text = text, bump = bump, atlas = atlas, commas = commas, nameOf = nameOf,
@@ -822,23 +1086,3 @@ BUI.Kit = {
     newScroll = newScroll, newCatButton = newCatButton, styleCatButton = styleCatButton,
     badgeTooltip = badgeTooltip,
 }
-
-ns.slash.badges = { help = "open your badges (or: /mw badges Name)", fn = function(rest)
-    local key = rest and rest ~= "" and ns.key(rest) or nil
-    if key and not (ns.Roster and ns.Roster.Get(key)) then
-        -- a first name only: find the guildie
-        for k, m in pairs(ns.Roster.All()) do
-            if k:match("^" .. key:gsub("%p", "%%%0") .. " ") or k == key then key = k; break end
-        end
-    end
-    Badges.View(key)
-end }
-
--- /mw icon Name [Name...]: shows icons in chat, to pick badge art.
-ns.slash.icon = { help = "preview icons by name: /mw icon Ability_DemonHunter_ThrowGlaive", fn = function(rest)
-    for name in (rest or ""):gmatch("%S+") do
-        local path = "Interface\\Icons\\" .. name
-        local id = GetFileIDFromPath and GetFileIDFromPath(path)
-        ns.print(id and ("|T%s:28|t %s"):format(path, name) or (name .. " - not on this client"))
-    end
-end }

@@ -21,9 +21,11 @@ MapMini.lua
 Compat_OpenMap.lua
 Alert.lua
 UI.lua
+Dialog.lua
 Leaderboard.lua
 Badges.lua
 Ledger.lua
+Hunt.lua
 BadgesUI.lua
 OfficerUI.lua
 GuildTabs.lua

@@ -130,7 +130,7 @@ end
 -- with no index that means Stats, the first of them.
 function ns.ToggleWindow(index)
     local p = index and pages[index]
-    if ns.GuildTabs and ns.GuildTabs.Available() and (not index or (p and p.guild)) then
+    if ns.GuildTabs and ns.GuildTabs.Hosting() and (not index or (p and p.guild)) then
         if ns.GuildTabs.Toggle(index) then return end
     end
     if not win then buildWindow() end

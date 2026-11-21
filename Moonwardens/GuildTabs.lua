@@ -24,7 +24,12 @@ local tabs = {}             -- our tab buttons, in page order
 local current               -- page index shown on the guild window, or nil
 local opened = false        -- the window has been open this session (login/reload: Leaderboard first)
 local remembered            -- our page to come back to: the window reopened, or the guild picked again
+local pending               -- a page asked for while the window was closed (GT.Toggle): it opens on this
 local W, H = 1018, 533      -- the window with Moonwardens picked: a quarter bigger than the game's 814 x 426
+-- (what we know about the game's frames we keep here, never on them: a
+-- field written onto one of the game's frames is tainted for its code)
+local shownTitle            -- the title we last gave the window
+local hookedTabs = setmetatable({}, { __mode = "k" })   -- the game's tabs we've hooked
 
 -- Is the community picked in the window our guild? Everything of ours on the
 -- guild window (tabs, size, title, the roster's extras) is for it only.
@@ -44,8 +49,8 @@ local function guildLook(guild, info)
     if guild and math.abs(w - 814) < 1 and math.abs(h - 426) < 1 then cf:SetSize(W, H)
     elseif not guild and math.abs(w - W) < 1 and math.abs(h - H) < 1 then cf:SetSize(814, 426) end
     local title = guild and (info and info.name ~= "" and info.name or "Moonwardens") or COMMUNITIES_FRAME_TITLE
-    if title and cf.SetTitle and cf.mwTitle ~= title then
-        cf.mwTitle = title
+    if title and cf.SetTitle and shownTitle ~= title then
+        shownTitle = title
         pcall(cf.SetTitle, cf, title)
     end
 end
@@ -91,8 +96,8 @@ end
 
 -- A tab of the game's was clicked: its page, not ours.
 local function hookGameTab(t)
-    if t.mwHooked then return end
-    t.mwHooked = true
+    if hookedTabs[t] then return end
+    hookedTabs[t] = true
     t:HookScript("OnClick", function() GT.Deselect() end)
 end
 
@@ -303,6 +308,11 @@ local function attach()
             -- First open since login/reload: the Leaderboard. After that, as
             -- the game does: the page you left it on (the game remembers its
             -- own; ours we bring back).
+            if pending and tabs[1]:IsShown() then
+                local want = pending
+                pending = nil
+                GT.Select(want)
+            end
             if not current then
                 if not opened then
                     if tabs[1]:IsShown() then GT.Select(tabs[1].index) end
@@ -336,15 +346,18 @@ function GT.Hosting()
     return true
 end
 
--- Can the pages live on the guild window? Loads it if need be.
+-- (GT.Available: can the pages live on the guild window, as it is now?)
+-- Is the guild window there for our pages? Never loads it: loading the
+-- game's guild window from addon code taints it (see GT.Toggle).
 function GT.Available()
     if attached then return true end
     if not (IsInGuild and IsInGuild()) then return false end
-    if not CommunitiesFrame then
-        local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
-        if load then pcall(load, "Blizzard_Communities") end
-    end
-    return attach()
+    return CommunitiesFrame and attach() or false
+end
+
+-- Is it open now, with our tabs on it?
+function GT.Open()
+    return attached and CommunitiesFrame and CommunitiesFrame:IsShown() and GT.GuildPicked() or false
 end
 
 -- The Roster page on the same background as our pages (Leaderboard,
@@ -431,27 +444,23 @@ end
 
 -- Minimap button and /mw: open the guild window on a page (default: the
 -- first, Stats), or close it if it's already showing one of ours.
+-- Show page `index` (default: the first, Leaderboard) on the guild window.
+-- We never open or close the game's windows ourselves: on this client a
+-- window opened or closed from addon code taints the game's window manager,
+-- and the next window it opens (the character pane, say) breaks on secret
+-- values. So: open, we switch to the page; closed, the page is kept for
+-- when the guild window next opens (J), and we say so.
 function GT.Toggle(index)
-    if not GT.Available() then return false end
-    local cf = CommunitiesFrame
-    if cf:IsShown() and current and (not index or index == current) then
-        HideUIPanel(cf)
-        return true
-    end
-    local want = index or tabs[1].index
-    if not cf:IsShown() then
-        if ToggleGuildFrame then ToggleGuildFrame() else ShowUIPanel(cf) end
-    end
-    if not cf:IsShown() then return false end
-    layout()
-    if tabs[1]:IsShown() then return GT.Select(want) end
-    -- Its tabs come up a frame later on some opens; then it's minimized or
-    -- on the guild finder, which have no tabs.
-    C_Timer.After(0, ns.guard(function()
+    if not (IsInGuild and IsInGuild()) or failed then return false end
+    local want = index or (tabs[1] and tabs[1].index) or 5
+    if GT.Open() then
         layout()
-        if tabs[1]:IsShown() then GT.Select(want)
-        else ns.print("Maximise the guild window to see the Moonwardens tabs.") end
-    end, "guild tabs"))
+        if GT.Select(want) then return true end
+    end
+    pending = want
+    local p = ns.UI.pages[want]
+    ns.print(("Press |cffffd100J|r to open the guild window; it opens on %s."):format(
+        p and (p.guild and p.guild.tooltip or p.label) or "Moonwardens"))
     return true
 end
 
@@ -468,27 +477,3 @@ function GT.Debug() return tabs, overlay, current end
 function GT.Relayout()
     if attached and CommunitiesFrame and CommunitiesFrame:IsShown() then layout() end
 end
-
--- /mw bg: our page background next to the Legacy window's, to compare.
-local function describe(label, t)
-    if not t then ns.print(label .. ": not there"); return end
-    local w, h = t:GetSize()
-    local layer, sub = t:GetDrawLayer()
-    local r, g, b, a = t:GetVertexColor()
-    ns.print(("%s: atlas %s, file %s, %dx%d, tile %s/%s, colour %.2f %.2f %.2f %.2f, alpha %.2f (shown %.2f), %s %s, %s"):format(
-        label, tostring(t.GetAtlas and t:GetAtlas()), tostring(t:GetTexture()), w or 0, h or 0,
-        tostring(t:GetHorizTile()), tostring(t:GetVertTile()), r or 0, g or 0, b or 0, a or 0,
-        t:GetAlpha(), t.GetEffectiveAlpha and t:GetEffectiveAlpha() or -1, tostring(layer), tostring(sub),
-        t:IsVisible() and "visible" or "hidden"))
-end
-ns.slash.bg = { help = "compare our page background with the Legacy window's", fn = function()
-    local L = LegacySystemFrame
-    describe("Legacy art", L and L.RewardTrackPage and L.RewardTrackPage.Background)
-    describe("Legacy rock", L and L.Bg)
-    describe("Our art", overlay and overlay.bg)
-    local cf = CommunitiesFrame
-    describe("Guild rock", cf and cf.Bg)
-    local inset = CommunitiesFrameInset or (cf and cf.Inset)
-    describe("Roster art", inset and inset.Bg)
-    if not L then ns.print("Open the Legacy window once, then run this again.") end
-end }

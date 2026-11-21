@@ -41,6 +41,9 @@ end
 -- When week `week` began (server time).
 function LB.WeekStart(week) return ANCHOR + week * WEEK end
 
+-- The week a moment `t` falls in.
+function LB.WeekOf(t) return math.floor((t - ANCHOR) / WEEK) end
+
 local function weekTable(week)
     local b = ns.db.board
     b[week] = b[week] or {}
@@ -426,7 +429,3 @@ ns.onLogin(function()
         ns.after(20, function() if not gotHS then request(2) end end, "hk retry")
     end, "hk login")
 end, "leaderboard")
-
-ns.slash.hk = { help = "my Horde kills in Ashenvale this week", fn = function()
-    ns.print(("%d Horde kills in Ashenvale this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
-end }

@@ -87,8 +87,11 @@ local function cellText(info)
 end
 
 -- After the game lays out a row: our cell after Zone, Rank after our cell.
+-- Our Layer cell for each of the game's roster rows (kept here, not on them).
+local cells = setmetatable({}, { __mode = "k" })
+
 local function refreshRow(row)
-    local cell = row.mwLayer
+    local cell = cells[row]
     local ml = row.GetMemberList and row:GetMemberList()
     local info = row.GetMemberInfo and row:GetMemberInfo()
     if not (row.expanded and info and ml and row.Zone and row.Rank and isGuildList(ml)) then
@@ -100,7 +103,7 @@ local function refreshRow(row)
         cell:SetJustifyH("LEFT")
         cell:SetWordWrap(false)
         cell:SetSize(CELL_W, 0)
-        row.mwLayer = cell
+        cells[row] = cell
     end
     row.Zone:SetWidth(ZONE_W)
     row.Rank:SetSize(RANK_W, 0)
