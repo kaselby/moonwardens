@@ -221,6 +221,54 @@ function ns.AddGuildieLines(tt, hits)
     if #hits > MAX_LINES then tt:AddLine(("and %d more"):format(#hits - MAX_LINES), 0.62, 0.62, 0.62) end
 end
 
+-- A group member (a unit token) who is a guildie with the addon: their
+-- position entry, as our dots carry; else nil. (The game draws group members
+-- itself; on both maps their tooltip becomes ours - see GroupTooltip.)
+function ns.GroupGuildie(unit)
+    if type(unit) ~= "string" then return nil end
+    local first, last = ns.try(UnitName, unit)
+    if type(first) ~= "string" then return nil end
+    local key = ns.key((type(last) == "string" and last ~= "") and (first .. " " .. last) or first)
+    if not (key and ns.Roster.Get(key)) then return nil end
+    return ns.Position.All()[key]
+end
+
+-- The game's tooltip for group members (world map pin, minimap) lists
+-- names, one a line. If every name in `tt` is one of `ghits` (guildies with
+-- the addon), its lines are replaced with ours: true. Else nothing is
+-- touched (ours are added after the game's by the caller): false.
+-- Only the tooltip's text is changed, never the game's pin or its data.
+function ns.GroupTooltip(tt, ghits, extra)
+    if #ghits == 0 then return false end
+    local keys = {}
+    for _, h in ipairs(ghits) do keys[h.d.g.key] = true end
+    local any = false
+    for i = 1, tt:NumLines() do
+        local fs = _G[tt:GetName() .. "TextLeft" .. i]
+        local t = fs and fs:GetText()
+        if type(t) == "string" and ns.readable(t) then
+            t = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+            for line in t:gmatch("[^\n]+") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then
+                    local name = line:gsub("%s*%(.-%)$", "")      -- (a note after the name, AFK and the like)
+                    local key = ns.key(name)
+                    if not (key and keys[key]) then return false end
+                    any = true
+                end
+            end
+        end
+    end
+    if not any then return false end
+    local all = {}
+    for _, h in ipairs(ghits) do all[#all + 1] = h end
+    for _, h in ipairs(extra or {}) do all[#all + 1] = h end
+    tt:ClearLines()
+    ns.AddGuildieLines(tt, ns.SortHits(all))
+    tt:Show()
+    return true
+end
+
 -- "key,key": who is in a set of hits (first MAX_LINES).
 function ns.HitsKey(hits)
     local keys = {}
@@ -775,6 +823,8 @@ local function onWorldMap(f)
     return false
 end
 
+local replaced              -- { owner, key }: the game's group tooltip we replaced (until it rebuilds)
+
 local function pinTooltipUp()
     if not GameTooltip:IsShown() then return nil end
     local owner = GameTooltip:GetOwner()
@@ -788,6 +838,32 @@ end
 function MapWorld.Hover()
     local hits = viewport:IsMouseOver() and ns.DotsUnderCursor(dots, used, HOVER_RADIUS, tip) or {}
     local owner = pinTooltipUp()
+    -- The game's group member pin: the guildies under the cursor are the
+    -- ones it says are (its own hover). All of them ours: its tooltip is
+    -- replaced by ours, once per change of who (it rebuilds only then).
+    if owner and type(owner.GetCurrentMouseOverUnits) == "function" then
+        local ok, units = pcall(owner.GetCurrentMouseOverUnits, owner)
+        local ghits = {}
+        if ok and type(units) == "table" then
+            for unit in pairs(units) do
+                local g = ns.GroupGuildie(unit)
+                if g then ghits[#ghits + 1] = { d = { g = g } } end
+            end
+        end
+        if #ghits > 0 then
+            local all = {}
+            for _, h in ipairs(ghits) do all[#all + 1] = h end
+            for _, h in ipairs(hits) do all[#all + 1] = h end
+            local key = ns.HitsKey(ns.SortHits(all))
+            if replaced and replaced.owner == owner and replaced.key == key then return end
+            ns.HideDotTooltip(tip)
+            if ns.GroupTooltip(GameTooltip, ghits, hits) then
+                replaced = { owner = owner, key = key }
+                return
+            end
+            hits = all                    -- (others there too: ours join the game's)
+        end
+    end
     if owner then
         ns.HideDotTooltip(tip)            -- (never two boxes)
         if #hits == 0 then return end
@@ -806,7 +882,7 @@ end
 
 ns.onLogin(function()
     -- (whether or not the map drawing is on: harmless, and /mw map on needs no reload)
-    ns.WatchTooltip(GameTooltip, function() joined = nil end)
+    ns.WatchTooltip(GameTooltip, function() joined = nil; replaced = nil end)
 end, "world map tooltip")
 
 local function onShow()

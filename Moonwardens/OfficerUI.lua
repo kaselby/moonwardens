@@ -87,7 +87,7 @@ end
 ---------------------------------------------------------------------------
 local function badgeLabel(b)
     if not b then return "Pick a badge" end
-    return Badges.Title(b)
+    return Badges.Coin(b) .. Badges.Title(b)
 end
 
 local function buildAward(f, parent, w)
@@ -156,13 +156,13 @@ local function buildAward(f, parent, w)
                 for _, c in ipairs(top.children or {}) do
                     local list = {}
                     for _, b in ipairs(Badges.Grantable(c.id)) do
-                        local past = b.parent and b.month ~= Badges.BOUNTY.month
+                        local past = (b.parent and b.month ~= Badges.BOUNTY.month) or Badges.CategorySoon(b.cat)
                         if not past and ns.Ledger.CanAward(nil, b.id) then list[#list + 1] = b end
                     end
                     if #list > 0 then
                         root:CreateTitle(top.name .. ": " .. c.name)
                         for _, b in ipairs(list) do
-                            root:CreateRadio(Badges.Title(b), function(id) return state.badge == id end,
+                            root:CreateRadio(Badges.Coin(b) .. Badges.Title(b), function(id) return state.badge == id end,
                                 function(id) state.badge = id; OUI.Refresh() end, b.id)
                         end
                     end
@@ -263,7 +263,7 @@ local function buildAward(f, parent, w)
         end)
     end
     local function amount() return math.max(0, math.floor(tonumber(a.amount:GetText()) or 0)) end
-    local function title() local b = Badges.Get(state.badge); return b and Badges.Title(b) or "" end
+    local function title() local b = Badges.Get(state.badge); return b and (Badges.Coin(b) .. Badges.Title(b)) or "" end
     twice(a.add, function() return ("Add %d to %s's %s?"):format(amount(), K.nameOf(state.who), title()) end,
         function() return ns.Ledger.Award(state.who, state.badge, amount(), a.note:GetText()) end)
     twice(a.remove, function() return ("Take %d away from %s's %s?"):format(amount(), K.nameOf(state.who), title()) end,
@@ -344,7 +344,7 @@ local function fillAward(f)
                 K.commas(math.min(down, e.goal)), K.commas(e.goal),
                 (have >= e.goal and down < e.goal) and " |cffff4040(loses it)|r" or ""))
         elseif e.times > 0 then
-            a.card.after:SetText((b.kind == "weekly" or b.stack) and ("Earned %d time%s."):format(e.times, e.times == 1 and "" or "s")
+            a.card.after:SetText((b.kind == "weekly" or b.kind == "selfcount" or b.stack) and ("Earned %d time%s."):format(e.times, e.times == 1 and "" or "s")
                 or "Already earned.")
         else
             a.card.after:SetText(manual and "Enter how many to add." or "Not earned yet.")
@@ -415,7 +415,12 @@ local function describe(e)
         line = ("%s earned %s%s"):format(who(e.who), title, b and b.kind == "weekly" and (" (x%d)"):format(e.n or 1) or "")
         local bits = { "Claimed by their addon" }
         if e.week and e.week > 0 then bits[#bits + 1] = "week of " .. Badges.WeekDate(e.week) end
-        if e.value and e.value > 0 then bits[#bits + 1] = K.commas(e.value) .. " kills" end
+        if e.value and e.value > 0 then
+            local what = ({ captures = " capture points", outposts = " outposts", forts = " forts", victory = " victories",
+                ashenvale_outposts = " Ashenvale outposts", shobekaran = " Shobek'Aran captures",
+                lesi_cave = " Lesi's Bear Cave captures" })[b and b.series or ""]
+            bits[#bits + 1] = K.commas(e.value) .. (what or " kills")
+        end
         if e.version and e.version ~= "" then bits[#bits + 1] = "v" .. e.version end
         meta = table.concat(bits, "  -  ")
     end

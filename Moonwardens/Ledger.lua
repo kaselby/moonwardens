@@ -199,6 +199,7 @@ local REPORT_BACK, REPORT_NEAR = 7 * 86400, 1800
 function Ledger.Request(badgeId, when)
     local b = ns.Badges.Get(badgeId)
     if not (b and (b.requestable or b.autoRequest)) then return nil, "This badge can't be asked for." end
+    if ns.Badges.CategorySoon(b.cat) then return nil, "That's coming soon." end
     when = math.floor(tonumber(when) or 0)
     local t = now()
     if when > t + 300 then return nil, "That time hasn't happened yet." end
@@ -293,7 +294,15 @@ function Ledger.CheckClaims()
         if b.kind ~= "manual" and b.kind ~= "manualweekly" and b.kind ~= "granted" and b.kind ~= "placement" then
             local e = r.badges[b.id]
             if e.times > (done[b.id] or 0) then
-                claim(b.id, e.times, e.last, b.kind == "weekly" and (ns.Badges.MyWeeks()[e.last] or 0) or r.lifetime)
+                -- (what it was earned on: kills, or for the captures series, captures)
+                local value = r.lifetime
+                if b.series and ns.Captures then
+                    local byWeek, total = ns.Captures.Weeks(b.series)
+                    value = b.kind == "selfweekly" and (byWeek[e.last] or 0) or total
+                elseif b.kind == "weekly" then
+                    value = ns.Badges.MyWeeks()[e.last] or 0
+                end
+                claim(b.id, e.times, e.last, value)
                 done[b.id] = e.times
             end
         end
@@ -407,9 +416,10 @@ function Ledger.ManualFor(who)
                 -- (a revoked claim: one fewer of a badge the client counts itself)
                 out.deduct[e.badge] = (out.deduct[e.badge] or 0) + 1
             else
-                local c = out.claims[e.badge] or { n = 0 }
+                local c = out.claims[e.badge] or { n = 0, max = 0 }
                 c.n = c.n + 1
                 if not c.last or (e.week or 0) > c.last then c.last = e.week end
+                if (e.n or 0) > c.max then c.max = e.n end      -- (a claim says how many times in all)
                 out.claims[e.badge] = c
             end
         end

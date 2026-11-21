@@ -52,15 +52,39 @@ local function hovered()
     return ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
 end
 
+-- Group members who are guildies with the addon (the game draws their
+-- dots), where the game puts them: { g, dx, dy } from the minimap's centre.
+local groupSpots = {}
+
+-- Those of them under the cursor.
+local function groupHovered()
+    if #groupSpots == 0 or not holder or not overMinimap() then return {} end
+    local cx, cy = GetCursorPosition()
+    local s = holder:GetEffectiveScale()
+    local hx, hy = holder:GetCenter()
+    if not (hx and s and s > 0) then return {} end
+    cx, cy = cx / s, cy / s
+    local out = {}
+    for _, p in ipairs(groupSpots) do
+        local dx, dy = cx - (hx + p.dx), cy - (hy + p.dy)
+        if dx * dx + dy * dy <= HOVER_RADIUS * HOVER_RADIUS then out[#out + 1] = { d = { g = p.g } } end
+    end
+    return out
+end
+
 -- Each guildie as in 0.5.1, the name a notch bigger under the game's lines
 -- (shared with the world map: ns.AddGuildieLines in MapWorld.lua).
 local function addLines(tt, hits) ns.AddGuildieLines(tt, hits) end
 
--- The game's minimap tooltip is being built: add our guildies to it.
+-- The game's minimap tooltip is being built: add our guildies to it. If
+-- it only lists group members who are guildies with the addon, it becomes
+-- ours instead (ns.GroupTooltip, MapWorld.lua).
 local function onMinimapTooltip(tt)
     if tt ~= GameTooltip then return end
-    local hits = hovered()
-    if #hits > 0 then addLines(tt, hits) end
+    local hits, ghits = hovered(), groupHovered()
+    if #ghits > 0 and ns.GroupTooltip(tt, ghits, hits) then return end
+    for _, h in ipairs(ghits) do hits[#hits + 1] = h end
+    if #hits > 0 then addLines(tt, ns.SortHits(hits)) end
 end
 
 -- Does the game have minimap lines of its own under the cursor right now?
@@ -245,6 +269,16 @@ function MapMini.Update()
     local facing = rotating() and ns.try(GetPlayerFacing) or nil
     if facing and type(facing) ~= "number" then facing = nil end
     local limit = half - DOT_SIZE / 2 - 1
+    -- (group guildies: where the game draws them, for their tooltip)
+    local spots = {}
+    for _, p in ipairs(ns.GroupPositions(map)) do
+        local g = ns.GroupGuildie(p.unit)
+        if g then
+            local dx, dy = MapMini.Offset(p.x, p.y, px, py, w, h, ppy, facing)
+            if dx * dx + dy * dy <= limit * limit then spots[#spots + 1] = { g = g, dx = dx, dy = dy } end
+        end
+    end
+    groupSpots = spots
     local n = 0
     for _, g in pairs(ns.Position.All()) do
         if g.map == map then

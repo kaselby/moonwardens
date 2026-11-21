@@ -26,6 +26,7 @@ Leaderboard.lua
 Badges.lua
 Ledger.lua
 Hunt.lua
+Captures.lua
 BadgesUI.lua
 OfficerUI.lua
 GuildTabs.lua

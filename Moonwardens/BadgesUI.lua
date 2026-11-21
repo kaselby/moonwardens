@@ -87,13 +87,13 @@ end
 local function badgeTooltip(owner, b, e)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local c = Badges.TIER_COLOR[b.tier] or { 1, 0.82, 0 }
-    GameTooltip:AddLine(Badges.Title(b), c[1], c[2], c[3])
+    GameTooltip:AddLine(Badges.Coin(b, 16) .. Badges.Title(b), c[1], c[2], c[3])
     GameTooltip:AddLine(b.desc, 1, 1, 1, true)
     GameTooltip:AddLine(" ")
     if b.kind == "parent" then
         -- (a container: its children say what's earned)
     elseif e.times > 0 then
-        if b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack then
+        if b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount" or b.kind == "placement" or b.stack then
             GameTooltip:AddLine(("Earned %d time%s, last in the week of %s"):format(e.times, e.times == 1 and "" or "s",
                 Badges.WeekDate(e.last)), 0.12, 1, 0)
         else
@@ -105,6 +105,14 @@ local function badgeTooltip(owner, b, e)
     if b.kind == "weekly" then
         GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
         GameTooltip:AddLine("Can be earned again: every 500 kills in a week is a full Copper, Silver and Gold.", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "selfweekly" then
+        GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
+        GameTooltip:AddLine("Can be earned again each week. Counted when one falls to the Alliance with you inside it (Overlord).", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "selflifetime" then
+        GameTooltip:AddLine(("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
+        GameTooltip:AddLine("Counted when one falls to the Alliance with you inside it (Overlord).", 0.62, 0.62, 0.62, true)
+    elseif b.kind == "selfcount" then
+        GameTooltip:AddLine("Can be earned again: every Total Victory your raid takes counts.", 0.62, 0.62, 0.62, true)
     elseif b.kind == "manualweekly" then
         GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
         GameTooltip:AddLine("Can be earned again each week. Report your patrols for an officer to approve.", 0.62, 0.62, 0.62, true)
@@ -122,7 +130,7 @@ local function badgeTooltip(owner, b, e)
     else
         GameTooltip:AddLine(("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
     end
-    local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack
+    local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount" or b.kind == "placement" or b.stack
     if b.kind ~= "parent" then
         GameTooltip:AddLine(("Worth %d points%s"):format(b.points, again and " each time" or ""), 0.62, 0.62, 0.62)
     end
@@ -329,7 +337,7 @@ end
 
 local function styleCatButton(b, c, isParent, selected, indent)
     b.id, b.name, b.soon, b.parentOf = c.id, c.name, c.soon, isParent
-    b.label:SetText(c.name)
+    b.label:SetText(c.soon and (c.name .. " (coming soon)") or c.name)
     b.label:ClearAllPoints()
     b.label:SetPoint("LEFT", 10 + (indent or 0), 0)
     b.label:SetPoint("RIGHT", -26, 0)
@@ -471,7 +479,27 @@ local function newCard(parent)
     c.check:SetPoint("TOPRIGHT", -10, -6)
     c.date = text(c, "GameFontNormal")
     c.date:SetPoint("RIGHT", c.check, "LEFT", -2, 0)
-    c:SetScript("OnEnter", function(self) if self.badge then badgeTooltip(self, self.badge, self.entry) end end)
+    c:SetScript("OnEnter", function(self)
+        if not self.badge then return end
+        badgeTooltip(self, self.badge, self.entry)
+        -- A track: every tier, its goal and points, and what's earned of it.
+        local st, res = self.track, self.result
+        if st and res then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Tiers", 1, 0.82, 0)
+            for _, b in ipairs(st.track.tiers) do
+                local e = res.badges[b.id]
+                local col = Badges.TIER_COLOR[b.tier]
+                local name = b.tier:sub(1, 1):upper() .. b.tier:sub(2)
+                local goal = b.kind == "placement" and ({ "1st", "2nd", "3rd" })[b.place] or commas(b.goal)
+                local got = e.times > 0 and ((b.kind == "lifetime" or b.kind == "manual" or b.kind == "selflifetime")
+                    and "earned" or ("x" .. e.times)) or "-"
+                GameTooltip:AddDoubleLine(("%s  %s  (%d pts)"):format(name, goal, b.points), got,
+                    col[1], col[2], col[3], e.times > 0 and 0.12 or 0.5, e.times > 0 and 1 or 0.5, e.times > 0 and 0 or 0.5)
+            end
+            GameTooltip:Show()
+        end
+    end)
     c:SetScript("OnLeave", function() GameTooltip:Hide() end)
     return c
 end
@@ -542,7 +570,7 @@ end
 -- the one way for all of them: tall Legacy card, its children as rows,
 -- folding with a click. Keep it generic: nothing here may be about one
 -- particular compound badge.
-local function fillCard(c, b, e, key, result)
+local function fillCard(c, b, e, key, result, opts)
     c.badge, c.entry = b, e
     local earned = e.times > 0
     -- A month's Bounty Hunter card isn't greyed out while its month is
@@ -551,6 +579,7 @@ local function fillCard(c, b, e, key, result)
     -- wait for all of them.)
     local lit = earned
     if b.kind == "parent" then lit = b.active or (e.value or 0) > 0 end
+    if opts and opts.lit ~= nil then lit = opts.lit end      -- (a track: lit once any tier is earned)
     local kids = b.kind == "parent" and b.children or {}
     local open = #kids > 0 and not (saved and saved.shut[b.id])
     local rows = math.ceil(#kids / 2)
@@ -568,7 +597,7 @@ local function fillCard(c, b, e, key, result)
     c.times:ClearAllPoints()
     c.times:SetPoint("LEFT", c.title, "RIGHT", 6, 0)
     -- Re-earnable ones say how often; one-time ones don't.
-    if (b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "placement" or b.stack) and e.times > 0 then
+    if (b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount" or b.kind == "placement" or b.stack) and e.times > 0 then
         c.times:SetText("x" .. e.times); c.times:Show()
     else
         c.times:Hide()
@@ -580,12 +609,18 @@ local function fillCard(c, b, e, key, result)
     c.info:SetShown(plain)
     if b.kind == "parent" then
         c.progress:Set(e.value, e.goal, ("Bounties: %d / %d"):format(e.value or 0, e.goal or 0))
-    elseif b.kind == "weekly" or b.kind == "manualweekly" then
+    elseif b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" then
         c.progress:Set(e.value, e.goal, ("This week: %s / %s"):format(commas(e.value), commas(e.goal)))
     elseif b.kind == "placement" then
         c.progress:SetShown(false)
         c.info:SetShown(true)
         c.info:SetText("Claimed a day after the weekly reset, from last week's final standings.")
+    elseif b.kind == "selfcount" then
+        c.progress:SetShown(false)
+        c.info:SetShown(true)
+        local n = e.times or 0
+        c.info:SetText(("|cffffd100Earned %d time%s.|r  Counted each time: be in the raid, in the zone, when it falls."):format(
+            n, n == 1 and "" or "s"))
     elseif plain then
         local part = b.parent and Badges.Get(b.parent)
         local text = b.kind == "rank" and ("Comes with the rank of %s."):format(b.rank)
@@ -610,8 +645,10 @@ local function fillCard(c, b, e, key, result)
         end
         c.progress:Set(e.value, e.goal, waiting > 0 and ("%s / %s  (%d waiting)"):format(commas(e.value), commas(e.goal), waiting) or nil)
     end
+    local off = Badges.CategorySoon(b.cat)          -- (a category switched off: its buttons greyed)
     local canReport = b.requestable and not key
     c.report:SetShown(canReport and true or false)
+    c.report:SetEnabled(not off)
     if canReport then c.report:SetText("Report a " .. (b.unit or "Patrol"):gsub("^%l", string.upper)) end
     c.progress:SetPoint("TOPRIGHT", canReport and -140 or -70, -(CARD_H - 28))
     c.progress:SetPoint("TOPLEFT", #kids > 0 and 104 or 84, -(CARD_H - 28))   -- (room for a parent's +/-)
@@ -673,19 +710,85 @@ local function fillCard(c, b, e, key, result)
     return h
 end
 
+-- A tier track's card (Badges.TRACKS): the tier to earn next, drawn as a
+-- card of its own (fillCard), then lit if any tier was ever earned, titled
+-- "Name: Tier", and the tiers earned shown as coin counters along the
+-- bottom-left of the ribbon (xN where it can be earned again).
+local function fillTrack(c, head, key, result)
+    local st = Badges.TrackState(head.track, result)
+    local cur = st.current
+    local h = fillCard(c, cur, result.badges[cur.id], key, result, { lit = st.any, track = st })
+    c.track, c.result = st, result
+    c.times:Hide()
+    -- The check and date: the last time any tier was earned.
+    local last
+    for _, b in ipairs(st.track.tiers) do
+        local e = result.badges[b.id]
+        if e.times > 0 and e.last and (not last or e.last > last) then last = e.last end
+    end
+    c.dateBg:SetShown(last ~= nil)
+    c.check:SetShown(last ~= nil)
+    c.date:SetShown(last ~= nil)
+    if last then c.date:SetText(Badges.WeekDate(last)) end
+    if cur.kind == "placement" then
+        c.title:SetText(st.track.name)
+        c.desc:SetText(st.track.desc or cur.desc)
+    end
+    -- The counters: every tier earned at least once, low to high.
+    c.pips = c.pips or {}
+    local n = 0
+    for _, b in ipairs(st.track.tiers) do
+        local e = result.badges[b.id]
+        if e.times > 0 then
+            n = n + 1
+            local p = c.pips[n]
+            if not p then
+                p = CreateFrame("Frame", nil, c)
+                p:SetSize(40, 14)
+                p.coin = p:CreateTexture(nil, "OVERLAY")
+                p.coin:SetSize(13, 13)
+                p.coin:SetPoint("LEFT")
+                p.count = text(p, "GameFontHighlightSmall")
+                p.count:SetPoint("LEFT", p.coin, "RIGHT", 2, 0)
+                c.pips[n] = p
+            end
+            p.coin:SetTexture(Badges.COIN[b.tier])
+            local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "placement"
+            p.count:SetText(again and ("x" .. e.times) or "")
+            local col = Badges.TIER_COLOR[b.tier]
+            p.count:SetTextColor(col[1], col[2], col[3])
+            p:SetWidth(again and (16 + p.count:GetStringWidth() + 6) or 16)
+            p:ClearAllPoints()
+            if n == 1 then p:SetPoint("BOTTOMLEFT", c.ribbon, "BOTTOMLEFT", 72, 3)
+            else p:SetPoint("LEFT", c.pips[n - 1], "RIGHT", 4, 0) end
+            p:Show()
+        end
+    end
+    for i = n + 1, #c.pips do c.pips[i]:Hide() end
+    -- (with counters on the ribbon, the description sits a little lower)
+    c.desc:ClearAllPoints()
+    c.desc:SetPoint("TOPLEFT", c.ribbon, "BOTTOMLEFT", 72, n > 0 and -6 or -2)
+    c.desc:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+    return h
+end
+
 local function searchHits(result)
     local q = state.search:lower()
     local list = {}
+    local seenTrack = {}
     for _, b in ipairs(Badges.LIST) do
       if not b.parent then                    -- (a child is found through its parent's card)
-        local hay = Badges.Title(b) .. " " .. b.desc .. " " .. b.kind .. " " .. b.cat
+        local hay = Badges.Title(b) .. " " .. (b.tier or "") .. " " .. b.desc .. " " .. b.kind .. " " .. b.cat
         for _, cid in ipairs(b.children or {}) do
             local child = Badges.Get(cid)
             if child then hay = hay .. " " .. child.name .. " " .. child.desc end
         end
         for _, n in ipairs(b.target and b.target.names or {}) do hay = hay .. " " .. n end
         hay = hay:lower()
-        if hay:find(q, 1, true) then list[#list + 1] = b end
+        if hay:find(q, 1, true) and not (b.track and seenTrack[b.track]) then
+            if b.track then seenTrack[b.track] = true end
+            list[#list + 1] = b
+        end
       end
     end
     return list
@@ -701,7 +804,16 @@ local function showCards(f, list, result)
         c:ClearAllPoints()
         c:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
         c:SetPoint("RIGHT", child, "RIGHT", 0, 0)
-        local h = fillCard(c, b, result.badges[b.id], state.view, result)
+        local h
+        if b.track then h = fillTrack(c, b, state.view, result)
+        else
+            h = fillCard(c, b, result.badges[b.id], state.view, result)
+            c.track = nil
+            for _, p in ipairs(c.pips or {}) do p:Hide() end
+            c.desc:ClearAllPoints()
+            c.desc:SetPoint("TOPLEFT", c.ribbon, "BOTTOMLEFT", 72, -2)
+            c.desc:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+        end
         c.sel:Hide()
         f.cardY[b.id], f.cardOf[b.id] = y, c
         c:Show()
@@ -967,6 +1079,8 @@ end
 
 local function refresh(f)
     page = f
+    -- (a category switched off since it was last open: back to the Overview)
+    if Badges.CategorySoon(state.cat) then state.cat = "overview"; if saved then saved.cat = "overview" end end
     f.testBanner:SetShown(ns.Ledger and ns.Ledger.Testing() and true or false)
     refreshCats(f)
     local key = state.view
