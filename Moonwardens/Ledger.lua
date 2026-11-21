@@ -405,7 +405,8 @@ function Ledger.LatestGiving(who, badgeId)
 end
 
 function Ledger.ManualFor(who)
-    local out = { progress = {}, progressLast = {}, grants = {}, deduct = {}, claims = {}, weekly = {} }
+    -- (`lastAt`, `progressLastAt`: when, the event's time)
+    local out = { progress = {}, progressLast = {}, progressLastAt = {}, grants = {}, deduct = {}, claims = {}, weekly = {} }
     local revoked = {}
     for _, e in ipairs(each()) do
         if e.kind == "revoke" and e.ref then revoked[e.ref] = true end
@@ -419,6 +420,7 @@ function Ledger.ManualFor(who)
                 local c = out.claims[e.badge] or { n = 0, max = 0 }
                 c.n = c.n + 1
                 if not c.last or (e.week or 0) > c.last then c.last = e.week end
+                if (e.at or 0) > (c.lastAt or 0) then c.lastAt = e.at end
                 if (e.n or 0) > c.max then c.max = e.n end      -- (a claim says how many times in all)
                 out.claims[e.badge] = c
             end
@@ -429,6 +431,7 @@ function Ledger.ManualFor(who)
                 local c = ns.Badges.CounterOf(ns.Badges.Get(e.badge)) or e.badge
                 out.progress[c] = (out.progress[c] or 0) + e.n
                 if e.n > 0 and (e.week or 0) > (out.progressLast[c] or -1) then out.progressLast[c] = e.week end
+                if e.n > 0 and (e.at or 0) > (out.progressLastAt[c] or 0) then out.progressLastAt[c] = e.at end
                 -- (and per week, for the weekly ones)
                 local wk = out.weekly[c] or {}
                 wk[e.week or 0] = (wk[e.week or 0] or 0) + e.n
@@ -437,6 +440,7 @@ function Ledger.ManualFor(who)
                 local g = out.grants[badge] or { times = 0 }
                 g.times = g.times + 1
                 if not g.last or (e.week or 0) > g.last then g.last = e.week end
+                if (e.at or 0) > (g.lastAt or 0) then g.lastAt = e.at end
                 out.grants[badge] = g
             end
         end

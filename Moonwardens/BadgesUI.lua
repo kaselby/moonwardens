@@ -83,58 +83,120 @@ local function nameOf(key)
     return m and m.name or key
 end
 
--- The badge tooltip: title, what it takes, how it stands.
+-- The badge tooltip, laid out as totalRP3's character tooltip: the badge's
+-- icon where TRP puts the profile icon (32 px, 4 px to the title), its
+-- tier's coin on the icon's corner, the title where TRP puts the name (its
+-- size), and the points shield at the top right, as on the cards. Then
+-- what it takes, and how it stands.
+local TIP_ICON, TIP_SHIELD = 32, 0.65
+local tipDeco                -- our pieces on GameTooltip: the coin, the points
+local tipIconTex             -- (resolves a badge's icon to a file for the tooltip)
+
+local function tipDecor()
+    if tipDeco then return tipDeco end
+    local f = CreateFrame("Frame", nil, GameTooltip)
+    f:SetAllPoints()
+    f.coin = f:CreateTexture(nil, "OVERLAY")
+    f.points = f:CreateFontString(nil, "OVERLAY")
+    f.points:SetJustifyH("CENTER")
+    f.points:SetTextColor(1, 1, 1)
+    f.points:SetWordWrap(false)
+    tipIconTex = f:CreateTexture(nil, "BACKGROUND")
+    tipIconTex:Hide()
+    f:Hide()
+    GameTooltip:HookScript("OnHide", function() f:Hide() end)
+    pcall(GameTooltip.HookScript, GameTooltip, "OnTooltipCleared", function() f:Hide() end)
+    tipDeco = f
+    return f
+end
+
+-- The size totalRP3 draws names in (its setting), else its default.
+local function trpNameSize()
+    local ok, v = pcall(function() return TRP3_API.configuration.getValue("tooltip_char_mainSize") end)
+    return (ok and tonumber(v)) or 16
+end
+
+local function tipDate(t) return t and date("%m/%d/%y", t) or nil end
+
 local function badgeTooltip(owner, b, e)
+    local deco = tipDecor()
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local c = Badges.TIER_COLOR[b.tier] or { 1, 0.82, 0 }
-    GameTooltip:AddLine(Badges.Coin(b, 16) .. Badges.Title(b), c[1], c[2], c[3])
-    GameTooltip:AddLine(b.desc, 1, 1, 1, true)
-    GameTooltip:AddLine(" ")
+    -- The points: a badge's own; a parent's, its children's.
+    local pts = b.points or 0
     if b.kind == "parent" then
-        -- (a container: its children say what's earned)
-    elseif e.times > 0 then
-        if b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount" or b.kind == "placement" or b.stack then
-            GameTooltip:AddLine(("Earned %d time%s, last in the week of %s"):format(e.times, e.times == 1 and "" or "s",
-                Badges.WeekDate(e.last)), 0.12, 1, 0)
+        pts = 0
+        for _, cid in ipairs(b.children or {}) do local cb = Badges.Get(cid); pts = pts + (cb and cb.points or 0) end
+    end
+    local sw, sh = math.floor(35 * TIP_SHIELD + 0.5), math.floor(51 * TIP_SHIELD + 0.5)
+    GameTooltip:AddDoubleLine(Badges.Title(b), ("|A:Legacy-Tree-Frame-Points-Icon:%d:%d|a"):format(sh, sw), c[1], c[2], c[3], 1, 1, 1)
+    setIcon(tipIconTex, b.icon)
+    local file = tipIconTex:GetTexture()
+    local placed = file and pcall(GameTooltip.AddTexture, GameTooltip, file, {
+        width = TIP_ICON, height = TIP_ICON,
+        anchor = Enum and Enum.TooltipTextureAnchor and Enum.TooltipTextureAnchor.LeftCenter,
+        margin = { left = 0, right = 4, top = 0, bottom = 0 },
+    })
+    if file and not placed then pcall(GameTooltip.AddTexture, GameTooltip, file) end
+    if ns.UI and ns.UI.TooltipTitleSize then ns.UI.TooltipTitleSize(trpNameSize()) end
+    GameTooltip:AddLine(b.desc, 1, 1, 1, true)
+    -- How it stands.
+    local lines = {}
+    if e.times > 0 then
+        local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount"
+            or b.kind == "placement" or b.stack
+        local when = tipDate(e.lastAt)
+        if again then
+            local n = ("Earned %d time%s"):format(e.times, e.times == 1 and "" or "s")
+            lines[#lines + 1] = { when and (n .. ", last on " .. when) or n, 0.12, 1, 0 }
         else
-            GameTooltip:AddLine("Earned in the week of " .. Badges.WeekDate(e.last), 0.12, 1, 0)
+            lines[#lines + 1] = { when and ("Earned on " .. when) or "Earned", 0.12, 1, 0 }
         end
-    else
-        GameTooltip:AddLine("Not earned yet", 0.62, 0.62, 0.62)
     end
-    if b.kind == "weekly" then
-        GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
-        GameTooltip:AddLine("Can be earned again: every 500 kills in a week is a full Copper, Silver and Gold.", 0.62, 0.62, 0.62, true)
-    elseif b.kind == "selfweekly" then
-        GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
-        GameTooltip:AddLine("Can be earned again each week. Counted when one falls to the Alliance with you inside it (Overlord).", 0.62, 0.62, 0.62, true)
-    elseif b.kind == "selflifetime" then
-        GameTooltip:AddLine(("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
-        GameTooltip:AddLine("Counted when one falls to the Alliance with you inside it (Overlord).", 0.62, 0.62, 0.62, true)
-    elseif b.kind == "selfcount" then
-        GameTooltip:AddLine("Can be earned again: every Total Victory your raid takes counts.", 0.62, 0.62, 0.62, true)
-    elseif b.kind == "manualweekly" then
-        GameTooltip:AddLine(("This week: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
-        GameTooltip:AddLine("Can be earned again each week. Report your patrols for an officer to approve.", 0.62, 0.62, 0.62, true)
-    elseif b.kind == "placement" then
-        GameTooltip:AddLine("Can be earned again each week. Ties share the place.", 0.62, 0.62, 0.62, true)
+    if b.kind == "selflifetime" or b.kind == "manual" or b.kind == "lifetime" then
+        lines[#lines + 1] = { ("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0 }
     elseif b.kind == "granted" then
-        GameTooltip:AddLine("Granted by " .. Badges.Granters(b) .. ".", 1, 0.82, 0, true)
-        if b.stack then GameTooltip:AddLine("Can be earned again.", 0.62, 0.62, 0.62) end
-        if b.level then GameTooltip:AddLine(("Nobody in your party may be above level %d."):format(b.level), 0.62, 0.62, 0.62, true) end
+        lines[#lines + 1] = { "Granted by " .. Badges.Granters(b) .. ".", 1, 0.82, 0 }
     elseif b.kind == "parent" then
-        GameTooltip:AddLine(("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0)
-        GameTooltip:AddLine("Each is a badge of its own, worth its own points.", 0.62, 0.62, 0.62, true)
+        lines[#lines + 1] = { ("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0 }
     elseif b.kind == "rank" then
-        GameTooltip:AddLine(("Comes with the rank of %s, or any above it."):format(b.rank), 1, 0.82, 0, true)
-    else
-        GameTooltip:AddLine(("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0)
+        lines[#lines + 1] = { ("Comes with the rank of %s, or any above it."):format(b.rank), 1, 0.82, 0 }
     end
-    local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount" or b.kind == "placement" or b.stack
-    if b.kind ~= "parent" then
-        GameTooltip:AddLine(("Worth %d points%s"):format(b.points, again and " each time" or ""), 0.62, 0.62, 0.62)
+    if #lines > 0 then
+        GameTooltip:AddLine(" ")
+        for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], true) end
     end
     GameTooltip:Show()
+    -- Our pieces over it: the coin on the icon's corner, the points on the shield.
+    deco:SetFrameLevel(GameTooltip:GetFrameLevel() + 5)
+    local icon
+    for i = 1, 10 do
+        local t = _G["GameTooltipTexture" .. i]
+        if t and t:IsShown() then icon = t; break end
+    end
+    local coin = b.tier and Badges.COIN[b.tier]
+    deco.coin:ClearAllPoints()
+    if coin and icon then
+        local cs = math.floor(TIP_ICON * 0.4)
+        deco.coin:SetSize(cs, cs)
+        deco.coin:SetTexture(coin)
+        deco.coin:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", cs * 0.25, -cs * 0.25)
+        deco.coin:Show()
+    else
+        deco.coin:Hide()
+    end
+    local right = _G.GameTooltipTextRight1
+    deco.points:ClearAllPoints()
+    if right then
+        font(deco.points, pts >= 100 and "GameFontHighlightSmall" or "GameFontHighlight")
+        deco.points:SetText(pts)
+        deco.points:SetWidth(sw * 2)
+        deco.points:SetPoint("CENTER", right, "CENTER", 0, -4 * TIP_SHIELD)
+        deco.points:Show()
+    else
+        deco.points:Hide()
+    end
+    deco:Show()
 end
 
 ---------------------------------------------------------------------------
@@ -616,11 +678,8 @@ local function fillCard(c, b, e, key, result, opts)
         c.info:SetShown(true)
         c.info:SetText("Claimed a day after the weekly reset, from last week's final standings.")
     elseif b.kind == "selfcount" then
-        c.progress:SetShown(false)
-        c.info:SetShown(true)
-        local n = e.times or 0
-        c.info:SetText(("|cffffd100Earned %d time%s.|r  Counted each time: be in the raid, in the zone, when it falls."):format(
-            n, n == 1 and "" or "s"))
+        c.progress:SetShown(false)              -- (how often shows by the title)
+        c.info:SetShown(false)
     elseif plain then
         local part = b.parent and Badges.Get(b.parent)
         local text = b.kind == "rank" and ("Comes with the rank of %s."):format(b.rank)
@@ -1195,7 +1254,7 @@ end
 
 -- The Legacy-art pieces, for the Officers tab (OfficerUI.lua).
 BUI.Kit = {
-    font = font, text = text, bump = bump, atlas = atlas, commas = commas, nameOf = nameOf,
+    font = font, text = text, bump = bump, atlas = atlas, commas = commas, nameOf = nameOf, setIcon = setIcon,   -- (setIcon, badgeTooltip: the roster's Top Badges too)
     newIcon = newIcon, setBadgeIcon = setBadgeIcon, newBar = newBar, newHeading = newHeading,
     newScroll = newScroll, newCatButton = newCatButton, styleCatButton = styleCatButton,
     badgeTooltip = badgeTooltip,

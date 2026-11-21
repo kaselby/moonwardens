@@ -148,6 +148,33 @@ function UI.Pct(n, total)
 end
 
 ---------------------------------------------------------------------------
+-- GameTooltip's first line at another size: the tooltip text font at
+-- `size`, until the tooltip is cleared or hides (then the game's again).
+---------------------------------------------------------------------------
+local titleFonts, titleSaved, titleHooked = {}, nil, false
+function UI.TooltipTitleSize(size)
+    local line = _G.GameTooltipTextLeft1
+    if not (line and GameTooltipText and size) then return end
+    local f = titleFonts[size]
+    if not f then
+        local path, _, flags = GameTooltipText:GetFont()
+        f = CreateFont("MoonwardensTooltipTitle" .. size)
+        f:SetFont(path, size, flags or "")
+        titleFonts[size] = f
+    end
+    titleSaved = titleSaved or line:GetFontObject() or GameTooltipHeaderText
+    line:SetFontObject(f)
+    if not titleHooked then
+        titleHooked = true
+        local function restore()
+            if titleSaved then line:SetFontObject(titleSaved); titleSaved = nil end
+        end
+        GameTooltip:HookScript("OnHide", restore)
+        pcall(GameTooltip.HookScript, GameTooltip, "OnTooltipCleared", restore)
+    end
+end
+
+---------------------------------------------------------------------------
 -- Settings page
 ---------------------------------------------------------------------------
 UI.SETTINGS = {
@@ -172,7 +199,11 @@ UI.SETTINGS = {
 }
 
 local function buildSettings(f)
-    local y = 0
+    -- Everything else lives on the guild window now: say so, up top.
+    local moved = UI.Text(f, nil, nil, "CENTER")
+    moved:SetPoint("TOPLEFT", 0, 0); moved:SetPoint("TOPRIGHT", 0, 0)
+    moved:SetText("Moonwardens has moved to your Guild & Communities tab (|cffffd100J|r by default).")
+    local y = -26
     f.checks = {}
     for _, s in ipairs(UI.SETTINGS) do
         if not s[2] then

@@ -6,7 +6,10 @@
 -- Clicking its heading sorts by zone, then layer (unknown last), then name;
 -- again reverses the zones. Offline members always go last.
 -- Also: names in their RP name and colour (RP.lua, the Roleplay settings),
--- and wider Name, Zone and Rank columns for the bigger guild window; and a
+-- and wider Name, Zone and Rank columns for the bigger guild window; a
+-- Top Badges column after Note: their most prestigious badges (most points
+-- first, one per tier track), as small as the class icon, with the tier's
+-- coin bottom right, and the badge's own tooltip on hovering one; and a
 -- hover tooltip on every member: the game's details with their note, plus
 -- their RP profile (totalRP3's own tooltip only works on units in the world).
 --
@@ -14,8 +17,13 @@
 --  * Rows: CommunitiesMemberListEntryMixin:RefreshExpandedColumns anchors
 --    Rank to Zone each time; after it we put our cell there and Rank after
 --    our cell. Note follows Rank and simply gets narrower.
+--    Note runs to the row's right edge (or, with one of the game's extra
+--    guild columns, is 93 wide with that column after it): our badges go
+--    after it, its right end (or the extra column's left) moved to make
+--    room, and back when the list isn't the guild's.
 --  * Heading: the member list's ColumnDisplay:LayoutColumns rebuilds the
---    headings each layout; after it we add ours after Zone and move Rank's.
+--    headings each layout; after it we add ours after Zone and move Rank's,
+--    and Top Badges at Note's right end, Note shortened by as much.
 --  * Sort: the list keeps its active column in activeColumnSortIndex and
 --    re-sorts with it on every roster update. Ours is SORT_ID, a column the
 --    game doesn't have (its own SortByColumnIndex ignores it), and after
@@ -34,14 +42,17 @@ local SORT_ID = 99          -- our column for the list's sort state
 local NAME_EXTRA = 40
 local ZONE_W, ZONE_HEAD = 120, 130
 local RANK_W, RANK_HEAD = 95, 105
+local BADGE_N, BADGE_GAP = 3, 4      -- the badges column: how many, the space between
+local BADGE_TITLE = "Top Badges"
+local PRESTIGE_TTL = 60              -- (s) a guildie's badges are worked out again after this
 local hooked = false
-local header
+local header, badgeHeader
 
 -- Colours by how a guildie's layer relates to mine; the pale ones are leads.
 local LAYER_COLOR = {
     same = { 0.12, 1, 0 }, sameLead = { 0.6, 0.9, 0.55 },
     other = { 1, 0.5, 0.25 }, otherLead = { 0.95, 0.72, 0.55 },
-    zone = { 0.9, 0.9, 0.9 }, zoneLead = { 0.7, 0.7, 0.7 },
+    zone = { 1, 1, 1 }, zoneLead = { 0.7, 0.7, 0.7 },
     unknown = { 0.62, 0.62, 0.62 }, na = { 0.5, 0.5, 0.5 },
 }
 
@@ -90,12 +101,130 @@ end
 -- Our Layer cell for each of the game's roster rows (kept here, not on them).
 local cells = setmetatable({}, { __mode = "k" })
 
+-- A guildie's most prestigious badges (Badges.Prestigious: most points,
+-- then latest), the best tier of a track only, at most BADGE_N. Kept a
+-- while; dropped when the Ledger or anyone's badges change.
+local prestige = {}         -- key -> { at, list }
+local function prestigeOf(key)
+    if not (key and ns.Badges and ns.Badges.Of) then return {} end
+    local p = prestige[key]
+    if p and ns.now() - p.at < PRESTIGE_TTL then return p.list end
+    local list = {}
+    local ok, result = pcall(ns.Badges.Of, key)
+    if ok and type(result) == "table" then
+        local seen = {}
+        for _, b in ipairs(ns.Badges.Prestigious(result) or {}) do
+            local t = b.track or b.id
+            if not seen[t] then
+                seen[t] = true
+                list[#list + 1] = { b = b, e = result.badges[b.id] }
+            end
+            if #list >= BADGE_N then break end
+        end
+    end
+    prestige[key] = { at = ns.now(), list = list }
+    return list
+end
+
+-- The badges column's width, for icons the size of the row's class icon.
+local function iconSize(row)
+    local s = row and row.Class and row.Class:GetHeight()
+    return (s and s > 0) and s or 16
+end
+local function badgesWidth(size) return BADGE_N * size + (BADGE_N - 1) * BADGE_GAP end
+-- The column's width in rows: the icons, or the heading's title if wider
+-- (set when the headings are laid out).
+local colW
+
+-- Our badge icons for each roster row (kept here, not on them), and rows
+-- whose Note (or extra column) we moved.
+local badgeIcons = setmetatable({}, { __mode = "k" })
+local noteMoved = setmetatable({}, { __mode = "k" })
+local GUILDINFO_GAP = 20             -- as the game spaces Note and its extra column
+
+local function hideBadges(row)
+    for _, s in ipairs(badgeIcons[row] or {}) do s.tex:Hide(); s.coin:Hide(); s.hit:Hide() end
+    local moved = noteMoved[row]
+    if moved and row.Note then
+        if moved == "note" then row.Note:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        elseif row.GuildInfo then row.GuildInfo:SetPoint("LEFT", row.Note, "RIGHT", GUILDINFO_GAP, 0) end
+        noteMoved[row] = nil
+    end
+end
+
+local function newSlot(row)
+    local s = {}
+    s.tex = row:CreateTexture(nil, "ARTWORK")
+    s.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)         -- (the icon's border trimmed, as the class icon is)
+    s.coin = row:CreateTexture(nil, "OVERLAY", nil, 1)
+    -- Hovering the icon: the badge's tooltip (the Badges page's), in place of
+    -- the row's. The row gets its OnLeave and OnEnter as the cursor goes on
+    -- and off it, so the rest of the row is as before. Clicks go through to
+    -- the row (its right-click menu).
+    s.hit = CreateFrame("Frame", nil, row)
+    s.hit:EnableMouse(true)
+    if s.hit.SetPropagateMouseClicks then pcall(s.hit.SetPropagateMouseClicks, s.hit, true) end
+    s.hit:SetScript("OnEnter", ns.guard(function(self)
+        local Kit = ns.BadgesUI and ns.BadgesUI.Kit
+        if self.entry and self.entry.e and Kit and Kit.badgeTooltip then Kit.badgeTooltip(self, self.entry.b, self.entry.e) end
+    end, "roster badge tooltip"))
+    s.hit:SetScript("OnLeave", function(self) if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
+    s.hit:Hide()
+    return s
+end
+
+local function refreshBadges(row, info)
+    local size = iconSize(row)
+    local w = colW or badgesWidth(size)
+    local slots = badgeIcons[row]
+    if not slots then
+        slots = {}
+        for i = 1, BADGE_N do slots[i] = newSlot(row) end
+        badgeIcons[row] = slots
+    end
+    -- Room after Note: its right end moved in (it runs to the row's edge),
+    -- or the game's extra column moved along (Note is 93 wide then).
+    local extra = row.GuildInfo and row.GuildInfo:IsShown()
+    if extra then
+        row.GuildInfo:SetPoint("LEFT", row.Note, "RIGHT", GAP + w + GUILDINFO_GAP, 0)
+        noteMoved[row] = "extra"
+    else
+        row.Note:SetPoint("RIGHT", row, "RIGHT", -4 - w - GAP, 0)
+        noteMoved[row] = "note"
+    end
+    local list = prestigeOf(ns.key(info.name))
+    local Kit = ns.BadgesUI and ns.BadgesUI.Kit
+    local coins = ns.Badges and ns.Badges.COIN or {}
+    local cs = math.max(8, math.floor(size * 0.55))
+    for i, s in ipairs(slots) do
+        s.tex:SetSize(size, size)
+        s.tex:ClearAllPoints()
+        if i == 1 then s.tex:SetPoint("LEFT", row.Note, "RIGHT", GAP, 0)
+        else s.tex:SetPoint("LEFT", slots[i - 1].tex, "RIGHT", BADGE_GAP, 0) end
+        s.coin:SetSize(cs, cs)
+        s.coin:ClearAllPoints()
+        s.coin:SetPoint("BOTTOMRIGHT", s.tex, "BOTTOMRIGHT", 2, -2)
+        s.hit:SetAllPoints(s.tex)
+        local e = list[i]
+        s.hit.entry = e
+        if e and Kit and Kit.setIcon then
+            Kit.setIcon(s.tex, e.b.icon); s.tex:Show()
+            local coin = e.b.tier and coins[e.b.tier]
+            if coin then s.coin:SetTexture(coin); s.coin:Show() else s.coin:Hide() end
+            s.hit:Show()
+        else
+            s.tex:Hide(); s.coin:Hide(); s.hit:Hide()
+        end
+    end
+end
+
 local function refreshRow(row)
     local cell = cells[row]
     local ml = row.GetMemberList and row:GetMemberList()
     local info = row.GetMemberInfo and row:GetMemberInfo()
     if not (row.expanded and info and ml and row.Zone and row.Rank and isGuildList(ml)) then
         if cell then cell:Hide() end
+        hideBadges(row)
         return
     end
     if not cell then
@@ -115,6 +244,7 @@ local function refreshRow(row)
     cell:SetText(text)
     if c then cell:SetTextColor(c[1], c[2], c[3]) end
     cell:Show()
+    if row.Note then refreshBadges(row, info) end
 end
 
 ---------------------------------------------------------------------------
@@ -274,19 +404,27 @@ local function onHeaderClick()
     ml:RefreshListDisplay()
 end
 
+-- The Layer legend's title: the tooltip's text font, 1 px larger.
+local function legendTitle()
+    local _, size = GameTooltipText:GetFont()
+    ns.UI.TooltipTitleSize(math.floor((size or 12) + 0.5) + 1)
+end
+
 -- After the game lays out the headings: ours after Zone, Rank's after ours.
 local function layoutHeader(cd, columnInfo)
     local ml = memberList()
-    local name, zone, rank
+    local name, zone, rank, note
     if cd.columnHeaders and cd.columnHeaders.EnumerateActive and ml and isGuildList(ml) and type(columnInfo) == "table"
             and columnInfo[4] and columnInfo[4].attribute == "zone" and columnInfo[5] then
         for h in cd.columnHeaders:EnumerateActive() do
             local id = h:GetID()
-            if id == 3 then name = h elseif id == 4 then zone = h elseif id == 5 then rank = h end
+            if id == 3 then name = h elseif id == 4 then zone = h elseif id == 5 then rank = h
+            elseif id == 6 and columnInfo[6] and columnInfo[6].attribute == "memberNote" then note = h end
         end
     end
     if not (zone and rank) then
         if header then header:Hide() end
+        if badgeHeader then badgeHeader:Hide() end
         return
     end
     if not header then
@@ -297,9 +435,11 @@ local function layoutHeader(cd, columnInfo)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local c = LAYER_COLOR
             local function key(label, col) if col then GameTooltip:AddLine(label, col[1], col[2], col[3]) end end
+            key("Layer Legend", { 1, 0.82, 0 })
+            legendTitle()
             key("Your layer", c.same); key("Another layer in your zone", c.other)
-            key("In another zone", c.zone); key("Layer 2? - probably (a lead only)", c.otherLead)
-            key("? - unknown", c.unknown)
+            key("Possibly another layer in your zone?", c.otherLead)
+            key("In another zone", c.zone); key("? - unknown", c.unknown)
             GameTooltip:Show()
         end)
         header:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -313,6 +453,40 @@ local function layoutHeader(cd, columnInfo)
     header:SetPoint("BOTTOMLEFT", zone, "BOTTOMRIGHT", -2, 0)
     rank:ClearAllPoints()
     rank:SetPoint("BOTTOMLEFT", header, "BOTTOMRIGHT", -2, 0)
+    header:Show()
+    -- Badges, after Rank; Note after it.
+    if not note then
+        if badgeHeader then badgeHeader:Hide() end
+        return
+    end
+    if not badgeHeader then
+        badgeHeader = CreateFrame("Button", nil, cd, "ColumnDisplayButtonTemplate")
+        badgeHeader:SetText(BADGE_TITLE)
+    end
+    -- The column: the icons, or the title if that's wider.
+    local fs = badgeHeader.GetFontString and badgeHeader:GetFontString()
+    local textW = fs and fs:GetStringWidth() or 0
+    local w = math.max(badgesWidth(16), math.ceil(textW) + 14)
+    local changed = w ~= colW
+    colW = w
+    -- Note's right end (where the game stretched it to) moves in by ours;
+    -- ours takes that end. With no right end it is shortened instead.
+    local rp, rel, relP, rx, ry
+    for i = 1, note:GetNumPoints() do
+        local p, r, q, x, y = note:GetPoint(i)
+        if p == "BOTTOMRIGHT" then rp, rel, relP, rx, ry = p, r, q, x, y end
+    end
+    badgeHeader:ClearAllPoints()
+    if rp then
+        note:SetPoint("BOTTOMRIGHT", rel, relP, (rx or 0) - (w + GAP), ry or 0)
+        badgeHeader:SetPoint("BOTTOMRIGHT", rel, relP, rx or 0, ry or 0)
+    else
+        note:SetWidth(math.max(40, note:GetWidth() - (w + GAP)))
+    end
+    badgeHeader:SetPoint("BOTTOMLEFT", note, "BOTTOMRIGHT", -2, 0)
+    if not rp then badgeHeader:SetWidth(w + GAP + 2) end
+    badgeHeader:Show()
+    if changed then refreshRows(false) end
     header:Show()
 end
 
@@ -348,6 +522,9 @@ local function attach()
     -- someone phones theirs in or a Roleplay setting changes.
     ns.every(2, function() refreshRows(false) end, "roster layer")
     ns.listen("RP", function() refreshRows(true) end)
+    -- (badges changed: work them out again)
+    ns.listen("LEDGER", function() prestige = {} end)
+    ns.listen("BADGES", function(key) if key then prestige[key] = nil else prestige = {} end end)
 end
 
 ns:On("ADDON_LOADED", function(name)

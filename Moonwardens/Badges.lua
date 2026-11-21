@@ -70,7 +70,7 @@ local COIN = {
     copper = "Interface\\MoneyFrame\\UI-CopperIcon",
     silver = "Interface\\MoneyFrame\\UI-SilverIcon",
     gold = "Interface\\MoneyFrame\\UI-GoldIcon",
-    moonstone = "Interface\\Icons\\INV_Misc_Gem_Crystal_02",      -- (a moonstone, for the tier past Gold)
+    moonstone = "Interface\\Icons\\inv_misc_gem_crystal_01",      -- (a moonstone, for the tier past Gold)
 }
 Badges.COIN = COIN
 Badges.TIER_COLOR = { copper = { 0.93, 0.6, 0.35 }, silver = { 0.85, 0.87, 0.9 }, gold = { 1, 0.82, 0 },
@@ -164,7 +164,7 @@ local function times(n) return n == 1 and "1 time" or (n .. " times") end
 Badges.LIST[#Badges.LIST + 1] = {
     id = "tv", cat = "objectives", kind = "selfcount", series = "victory", points = 50, goal = 1,
     name = "Tor ilisar'thera'nal!", icon = { "Achievement_Zone_Ashenvale_01", "INV_BannerPVP_02" },
-    desc = "Be in the raid that takes all of Ashenvale for the Alliance, in the zone when it falls.",
+    desc = "Be in the party or raid that takes all of Ashenvale on Overlord.",
 }
 -- Ashenvale Defense > Objectives: the Ashenvale front's capture points (no
 -- other front's), and Ashenvale's two outposts, Shobek'Aran and Lesi's Bear
@@ -613,6 +613,19 @@ function Badges.Compute(weeks, manual, key)
             end
             e.value = e.times
         end
+        -- When it was last earned (a time): the latest of its claims, grants
+        -- and, for the ones officers count, progress. (Nil: not known.)
+        if e.times > 0 then
+            local at = 0
+            local c, g = manual.claims[b.id], manual.grants[b.id]
+            if c and (c.lastAt or 0) > at then at = c.lastAt end
+            if g and (g.lastAt or 0) > at then at = g.lastAt end
+            if b.kind == "manual" or b.kind == "manualweekly" then
+                local p = manual.progressLastAt and manual.progressLastAt[Badges.CounterOf(b)]
+                if (p or 0) > at then at = p end
+            end
+            e.lastAt = at > 0 and at or nil
+        end
         e.goal = b.goal
         e.points = b.points * e.times
         score = score + e.points
@@ -620,17 +633,19 @@ function Badges.Compute(weeks, manual, key)
     -- Parents: how many of their children are done; complete when all are.
     for _, b in ipairs(Badges.LIST) do
         if b.kind == "parent" then
-            local e, done, last = out[b.id], 0, nil
+            local e, done, last, lastAt = out[b.id], 0, nil, nil
             for _, cid in ipairs(b.children) do
                 local c = out[cid]
                 if c and c.times > 0 then
                     done = done + 1
                     if not last or (c.last or 0) > last then last = c.last end
+                    if (c.lastAt or 0) > (lastAt or 0) then lastAt = c.lastAt end
                 end
             end
             e.value, e.goal, e.points = done, #b.children, 0
             e.times = (done > 0 and done == #b.children) and 1 or 0
             e.last = e.times > 0 and last or nil
+            e.lastAt = e.times > 0 and lastAt or nil
             local pts = 0
             for _, cid in ipairs(b.children) do pts = pts + (out[cid] and out[cid].points or 0) end
             e.childPoints = pts
