@@ -218,7 +218,7 @@ end, "rp")
 ---------------------------------------------------------------------------
 -- Guildies coming online / going offline: their RP name in the game's line
 -- ("[Moonborn Starcaller] has come online."), when "Show guildies custom
--- Roleplay names" is on, in their RP colour too when "colors" is. The link
+-- Roleplay names" is on, in the game's own colour for the line. The link
 -- still whispers the character. Anyone else's line, or a guildie with no RP
 -- name, is left exactly as the game wrote it.
 -- (The game's own templates, ERR_FRIEND_ONLINE_SS / ERR_FRIEND_OFFLINE_S,
@@ -231,18 +231,13 @@ local function toPattern(fmt)
     return "^" .. p .. "$"
 end
 
--- The RP name to show for a guildie in chat, coloured when that's on; nil to leave it.
+-- The RP name to show for a guildie in chat; nil to leave it.
 local function chatName(name)
     local key = ns.key(name)
     if not key or not (ns.Roster and ns.Roster.Get(key)) then return nil end
     local rp = RP.Name(key)
     if not rp then return nil end
-    rp = rp:gsub("|", "")
-    local r, g, b = RP.Color(key)
-    if r then
-        rp = ("|cff%02x%02x%02x%s|r"):format(math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5), rp)
-    end
-    return rp
+    return (rp:gsub("|", ""))       -- (in the line's own colour: no RP colour here)
 end
 
 local onlinePattern, offlinePattern
