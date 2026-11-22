@@ -112,13 +112,13 @@ local LIFETIME_ICON = { "inv_ability_eluneschosendruid_boundlessmoonlight", "Spe
 Badges.LIST = {
     { id = "lt1", cat = "ashenvale", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 10,000 Horde in Ashenvale." },
+      desc = "Kill or assist in killing 10,000 Horde in Ashenvale or Stonetalon." },
     { id = "lt2", cat = "ashenvale", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 25,000 Horde in Ashenvale." },
+      desc = "Kill or assist in killing 25,000 Horde in Ashenvale or Stonetalon." },
     { id = "lt3", cat = "ashenvale", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 50,000 Horde in Ashenvale." },
+      desc = "Kill or assist in killing 50,000 Horde in Ashenvale or Stonetalon." },
 }
 -- Patrols: no client can count these. Guildies report a patrol (the card's
 -- Report a Patrol), officers approve it in the Officers tab (or award it
@@ -362,7 +362,7 @@ end
 -- Moonstone for the kills (past Gold: 100,000 in all).
 Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "ashenvale", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
     name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-    desc = "Kill or assist in killing 100,000 Horde in Ashenvale." }
+    desc = "Kill or assist in killing 100,000 Horde in Ashenvale or Stonetalon." }
 
 ---------------------------------------------------------------------------
 -- TIER TRACKS: one card for all the tiers of a badge
@@ -374,6 +374,20 @@ Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "ashenvale", kind = "lifetim
 -- Log entries), so nothing earned moves. Tiers are tracked by `track`,
 -- given here to every tiered badge; their order is Badges.TIER_ORDER.
 -- (Not a compound badge: those group different badges - Badges.Compound.)
+-- What a badge's goal counts, in one word, for the Tiers tooltip
+-- ("Copper 10,000 kills", "Gold 1st place"). By what's counted; a badge can
+-- say its own (`measure`).
+local MEASURE = { captures = "captures", shobekaran = "captures", lesi_cave = "captures", ashenvale_outposts = "captures",
+    outposts = "outposts", forts = "forts", victory = "victories" }
+for _, b in ipairs(Badges.LIST) do
+    if not b.measure then
+        if b.kind == "lifetime" or b.kind == "weekly" then b.measure = "kills"
+        elseif b.kind == "placement" then b.measure = "place"
+        elseif b.counter == "patrol" then b.measure = "patrols"
+        elseif b.series then b.measure = MEASURE[b.series] end
+    end
+end
+
 Badges.TRACKS = {}
 for _, b in ipairs(Badges.LIST) do
     if b.tier and not b.parent then
@@ -724,8 +738,9 @@ end
 -- { showcase = { id or false, x3 }, order = { id... } }; another guildie's
 -- come by whisper (BV) with their weeks, and their Showcase to the guild
 -- whenever it changes (BW). Never arranged: the Showcase is the three most
--- prestigious (a track's best tier only), the Collection by points. Badges
--- earned since the last arranging go first in the Collection, to be seen.
+-- prestigious, the Collection by points. Badges earned since the last
+-- arranging go first in the Collection, to be seen. A tier track is shown
+-- by its best tier earned, wherever its tiers were placed.
 Badges.SHOWCASE_N = 3
 local layouts = {}         -- key -> { showcase, order }, another guildie's
 
@@ -747,8 +762,10 @@ end
 -- The orders the Collection can be shown in (the Badge Chest's dropdown).
 Badges.SORTS = {
     { id = "arranged", text = "As arranged" },
-    { id = "pointsDesc", text = "Points: high to low" },
-    { id = "pointsAsc", text = "Points: low to high" },
+    -- (hidden for now, while badges' points aren't shown; still how new
+    -- badges and ties are ordered)
+    { id = "pointsDesc", text = "Points: high to low", hidden = true },
+    { id = "pointsAsc", text = "Points: low to high", hidden = true },
     { id = "newest", text = "Date earned: newest first" },
     { id = "oldest", text = "Date earned: oldest first" },
 }
@@ -816,14 +833,27 @@ end
 -- many slots are filled. `sort`: a Badges.SORTS id for the Collection (nil:
 -- "arranged").
 function Badges.Arrange(key, result, sort)
-    local items, byBadge = {}, {}
+    -- (a tier track: only its best tier earned, standing for the track -
+    -- its Tiers are in its tooltip)
+    local items, byGroup = {}, {}
     for _, b in ipairs(Badges.LIST) do
         local e = result.badges[b.id]
         if e and e.times > 0 then
-            local it = { b = b, e = e, pts = Badges.PointsOf(b), at = earnedAt(e) }
-            items[#items + 1] = it
-            byBadge[b.id] = it
+            local g = groupOf(b)
+            local had = byGroup[g]
+            if not had or (Badges.TIER_ORDER[b.tier] or 0) > (Badges.TIER_ORDER[had.b.tier] or 0) then
+                byGroup[g] = { b = b, e = e, pts = Badges.PointsOf(b), at = earnedAt(e) }
+            end
         end
+    end
+    for _, b in ipairs(Badges.LIST) do
+        local it = byGroup[groupOf(b)]
+        if it and it.b == b then items[#items + 1] = it end
+    end
+    -- (a saved id stands for its track: a lower tier placed, the best shown there)
+    local function itemFor(id)
+        local b = id and byId[id]
+        return b and byGroup[groupOf(b)]
     end
     local lay = Badges.LayoutOf(key)
     local ids = lay and lay.showcase
@@ -838,22 +868,24 @@ function Badges.Arrange(key, result, sort)
     end
     local show, shown, filled = {}, {}, 0
     for i = 1, Badges.SHOWCASE_N do
-        local id = ids[i]
-        local it = id and byBadge[id]
-        if it and not shown[id] then show[i] = it; shown[id] = true; filled = filled + 1 end
+        local it = itemFor(ids[i])
+        if it and not shown[it] then show[i] = it; shown[it] = true; filled = filled + 1 end
     end
     local rest = {}
-    for _, it in ipairs(items) do if not shown[it.b.id] then rest[#rest + 1] = it end end
+    for _, it in ipairs(items) do if not shown[it] then rest[#rest + 1] = it end end
     sort = sort or "arranged"
     local pos
     if sort == "arranged" and lay and lay.order then
         pos = {}
-        for i, id in ipairs(lay.order) do pos[id] = pos[id] or i end
+        for i, id in ipairs(lay.order) do
+            local it = itemFor(id)
+            if it then pos[it] = pos[it] or i end
+        end
     end
     local by = sortBy(sort == "arranged" and "pointsDesc" or sort)
     grouped(rest, function(x, y)
         if pos then
-            local a, c = pos[x.b.id], pos[y.b.id]
+            local a, c = pos[x], pos[y]
             if a and c then return a < c end
             if a ~= c then return a == nil end          -- (new ones, not yet arranged, first)
         end
@@ -863,8 +895,9 @@ function Badges.Arrange(key, result, sort)
 end
 
 -- Every badge they haven't earned, that can still be: closest to done
--- first (then the list's order). Nothing switched off, and no past month's
--- bounties. { b, e, frac } each; frac is how far along (0 to 1).
+-- first (then the list's order). Nothing switched off, no past month's
+-- bounties, and of a tier track only its lowest tier not earned. { b, e,
+-- frac } each; frac is how far along (0 to 1).
 function Badges.Unearned(result)
     local list = {}
     for i, b in ipairs(Badges.LIST) do
@@ -876,6 +909,15 @@ function Badges.Unearned(result)
             list[#list + 1] = { b = b, e = e, frac = g > 0 and v / g or 0, i = i }
         end
     end
+    -- (a tier track: only its lowest tier not earned - the next to go for)
+    local low = {}
+    for _, it in ipairs(list) do
+        local g = groupOf(it.b)
+        if not low[g] or (Badges.TIER_ORDER[it.b.tier] or 0) < (Badges.TIER_ORDER[low[g].b.tier] or 0) then low[g] = it end
+    end
+    local next_ = {}
+    for _, it in ipairs(list) do if low[groupOf(it.b)] == it then next_[#next_ + 1] = it end end
+    list = next_
     grouped(list, function(x, y)
         if x.frac ~= y.frac then return x.frac > y.frac end   -- (a track where its closest tier is)
         return x.i < y.i

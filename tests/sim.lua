@@ -686,6 +686,42 @@ check(countSent("V") == nV + 1, "someone else answered first: I stay quiet")
 
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
+---------------------------------------------------------------------------
+-- Badge Management (Officers): a window of its own, not a tab
+---------------------------------------------------------------------------
+check(not ns.UI.pages[6], "no Officers tab any more")
+ns.OfficerUI.Toggle()
+check(MoonwardensBadgeManagement and MoonwardensBadgeManagement:IsShown(), "Badge Management opens (I'm an officer)")
+ns.OfficerUI.Toggle()
+check(not MoonwardensBadgeManagement:IsShown(), "and closes")
+ns.OfficerUI.Open("thalanor oakheart")
+check(MoonwardensBadgeManagement:IsShown(), "Award Badge Progress opens it too")
+MoonwardensBadgeManagement:Hide()
+
+-- Badge points: hidden, until an officer shows them (/mw test badgepoints)
+check(not ns.BadgesUI.ShowPoints(), "badge points hidden")
+SlashCmdList.MOONWARDENS("test badgepoints on")
+check(ns.BadgesUI.ShowPoints(), "/mw test badgepoints on (an officer)")
+SlashCmdList.MOONWARDENS("test badgepoints off")
+check(not ns.BadgesUI.ShowPoints(), "/mw test badgepoints off")
+
+-- A tier track: its best tier earned in the Collection, its lowest not
+-- earned in the unacquired list (Wrath of the Kaldorei: lt1..lt4)
+do
+    local B = ns.Badges
+    local fake = { badges = {} }
+    for _, b in ipairs(B.LIST) do fake.badges[b.id] = { times = 0, value = 0 } end
+    fake.badges.lt1.times, fake.badges.lt2.times = 1, 1
+    local show, rest = B.Arrange("someone else", fake, "arranged")
+    local inCol = {}
+    for i = 1, B.SHOWCASE_N do if show[i] then inCol[show[i].b.id] = true end end
+    for _, it in ipairs(rest) do inCol[it.b.id] = true end
+    check(inCol.lt2 and not inCol.lt1, "Collection: Wrath's best tier earned (Silver) only")
+    local un = {}
+    for _, it in ipairs(B.Unearned(fake)) do un[it.b.id] = true end
+    check(un.lt3 and not un.lt4 and not un.lt1, "unacquired: Wrath's next tier (Gold) only")
+end
+
 local errs = {}
 for _, line in ipairs(W.prints) do if line:find("error", 1, true) then errs[#errs + 1] = line end end
 check(#errs == 0, "no errors printed by the addon:\n  " .. table.concat(errs, "\n  "))

@@ -45,6 +45,7 @@ Ledger.ADMINS = { ["shandor moonfang"] = true }
 local function isAdmin(key)
     return key and (Ledger.ADMINS[key] or (ns.Roster and ns.Roster.IsOfficer(key))) and true or false
 end
+Ledger.IsAdmin = isAdmin
 
 function Ledger.TestAllowed()
     local key = ns.meKey

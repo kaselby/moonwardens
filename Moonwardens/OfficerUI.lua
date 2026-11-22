@@ -799,20 +799,107 @@ function OUI.Refresh()
     if page and page:IsVisible() then refresh(page) end
 end
 
+---------------------------------------------------------------------------
+-- The window: Badge Management (Officers). Opened from its button on the
+-- Badges tab (officers, and whoever may award a badge) or "Award Badge
+-- Progress" in a right-click menu. Our own frame, wherever you are (no
+-- taint), as the Badge Inspector; movable (MoonwardensDB.officerPos),
+-- Escape closes it.
+---------------------------------------------------------------------------
+local WIN_W, WIN_H = 760, 500
+local win
+
+local function buildWindow()
+    if win then return win end
+    for _, t in ipairs({ "PortraitFrameTemplate", "BasicFrameTemplateWithInset" }) do
+        local ok, fr = pcall(CreateFrame, "Frame", "MoonwardensBadgeManagement", UIParent, t)
+        if ok and fr then win = fr; break end
+    end
+    if not win then
+        win = CreateFrame("Frame", "MoonwardensBadgeManagement", UIParent, "BackdropTemplate")
+        if win.SetBackdrop then
+            win:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 32, edgeSize = 32,
+                insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+        end
+        local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -4, -4)
+    end
+    win:SetSize(WIN_W, WIN_H)
+    win:SetFrameStrata("HIGH")
+    win:SetToplevel(true)
+    win:SetClampedToScreen(true)
+    win:EnableMouse(true)
+    win:SetMovable(true)
+    win:RegisterForDrag("LeftButton")
+    win:SetScript("OnDragStart", win.StartMoving)
+    win:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint(1)
+        if ns.db then ns.db.officerPos = { point, rel, x, y } end
+    end)
+    local pos = ns.db and ns.db.officerPos
+    win:ClearAllPoints()
+    if type(pos) == "table" and pos[1] then win:SetPoint(pos[1], UIParent, pos[2] or pos[1], pos[3] or 0, pos[4] or 0)
+    else win:SetPoint("CENTER", 0, 20) end
+    if win.SetTitle then pcall(win.SetTitle, win, "Badge Management (Officers)")
+    else
+        local fs = win.TitleText or (win.TitleContainer and win.TitleContainer.TitleText)
+        if fs then fs:SetText("Badge Management (Officers)") end
+    end
+    local icon = "Interface\\Icons\\INV_Misc_Note_06"
+    if not (win.SetPortraitToAsset and pcall(win.SetPortraitToAsset, win, icon)) then
+        local p = win.portrait or (win.PortraitContainer and win.PortraitContainer.portrait)
+        if p then p:SetTexture(icon) end
+    end
+    tinsert(UISpecialFrames, "MoonwardensBadgeManagement")   -- (Escape closes it)
+
+    -- The ground: as the Badges tab's (dark, the game's rock, the Legacy art).
+    local inset = CreateFrame("Frame", nil, win)
+    inset:SetPoint("TOPLEFT", 10, -62)
+    inset:SetPoint("BOTTOMRIGHT", -10, 10)
+    local under = inset:CreateTexture(nil, "BACKGROUND", nil, -4); under:SetAllPoints(); under:SetColorTexture(0.03, 0.03, 0.04, 1)
+    local rock = inset:CreateTexture(nil, "BACKGROUND", nil, -3); rock:SetAllPoints()
+    rock:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock", "REPEAT", "REPEAT")
+    rock:SetHorizTile(true); rock:SetVertTile(true)
+    local art = inset:CreateTexture(nil, "BACKGROUND", nil, -2); art:SetAllPoints()
+    if not K.atlas(art, "Legacy-Rewards-Tracker-background") then art:Hide() end
+
+    -- The page itself: what was the Officers tab.
+    local content = CreateFrame("Frame", nil, inset)
+    content:SetPoint("TOPLEFT", 8, -8)
+    content:SetSize(WIN_W - 20 - 16, WIN_H - 72 - 16)
+    win.content = content
+    ns.guard(build, "build Badge Management")(content)
+    win:SetScript("OnShow", function() ns.guard(refresh, "Badge Management")(content) end)
+    win:SetScript("OnHide", function() GameTooltip:Hide() end)
+    win:Hide()
+    return win
+end
+
+-- Open or close it (the Badges tab's button). Only for those who may award.
+function OUI.Toggle()
+    if not (ns.Ledger and ns.Ledger.CanAward()) then return end
+    buildWindow()
+    if win:IsShown() then win:Hide() else win:Show(); win:Raise() end
+end
+
 -- Open Award Progress for a guildie (the right-click menu).
 function OUI.Open(key)
+    if not (ns.Ledger and ns.Ledger.CanAward()) then return end
     state.view = "award"
     if ns.db then ns.db.officerUI = ns.db.officerUI or {}; ns.db.officerUI.view = "award" end
     state.who = key
+    buildWindow()
     if page and page.award then page.award.name:SetText(key and K.nameOf(key) or "") end
-    ns.ToggleWindow(6)          -- (switches tab if the guild window is open; else it opens there on J)
+    win:Show(); win:Raise()
     OUI.Refresh()
 end
 
-UI.AddPage(6, "Officers", build, refresh,
-    { order = 3, icon = { "INV_Misc_Note_06", "INV_Scroll_03" }, tooltip = "Officers", title = "Officer",
-      bgAtlas = "Legacy-Rewards-Tracker-background",
-      visible = function() return ns.Ledger and ns.Ledger.CanAward() end })
+-- (no longer allowed - test mode off, a rank lost: closed)
+ns.onLogin(function()
+    ns.listen("LEDGER", function() if win and win:IsShown() and not ns.Ledger.CanAward() then win:Hide() end end)
+end, "badge management")
 
 -- The Audit Log's questions, in our own dialog (Dialog.lua), never the
 -- game's StaticPopup.

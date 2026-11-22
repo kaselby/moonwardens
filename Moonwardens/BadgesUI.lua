@@ -186,6 +186,34 @@ function New.See(ids)
 end
 function New.SeeCard(b, st) return New.See(cardIds(b, st)) end
 
+-- An earned badge on the board (Showcase, Collection) stands for its
+-- track's lower tiers too, so their new-dots are its own. (Only their
+-- new-dots: a lower tier not earned has its own icon, not earned.)
+local function lowerTiers(b)
+    local ids = {}
+    local t = b.track and Badges.TRACKS[b.track]
+    local mine = Badges.TIER_ORDER[b.tier] or 0
+    for _, x in ipairs(t and t.tiers or {}) do
+        if (Badges.TIER_ORDER[x.tier] or 0) < mine then ids[#ids + 1] = x.id end
+    end
+    return ids
+end
+function New.IsShown(b)
+    if New.Is(b.id) then return true end
+    local n = ns.db and ns.db.badgeNew or {}
+    for _, id in ipairs(lowerTiers(b)) do if n[id] then return true end end
+    return false
+end
+function New.SeeShown(b)
+    local any = New.See({ b.id })
+    local n = ns.db and ns.db.badgeNew
+    if not n then return any end
+    local lower = false
+    for _, id in ipairs(lowerTiers(b)) do if n[id] then n[id] = nil; lower = true end end
+    if lower then dotsChanged() end
+    return any or lower
+end
+
 -- The tab picked.
 function New.TabSeen()
     if ns.db and ns.db.badgeTabNew then ns.db.badgeTabNew = nil; dotsChanged() end
@@ -357,8 +385,8 @@ end
 -- The badge tooltip, laid out as totalRP3's character tooltip: the badge's
 -- icon where TRP puts the profile icon (32 px, 4 px to the title), its
 -- tier's coin on the icon's corner, the title where TRP puts the name (its
--- size), and the points shield at the top right, as on the cards. Then
--- what it takes, and how it stands.
+-- size). Then what it takes, and how it stands. (Badges' points aren't
+-- shown, here or on the cards; they still count underneath.)
 -- The points shield is drawn this much bigger than the number on it was
 -- made for (everywhere it shows: cards, rows, the chest, tooltips).
 local SHIELD_ART = 1.2
@@ -392,18 +420,72 @@ end
 
 local function tipDate(t) return t and date("%m/%d/%y", t) or nil end
 
+-- Badges' points, shown again (their shields on the cards, rows and
+-- tooltips, and in the Tiers): /mw test badgepoints on, for officers and
+-- Shandor only (Ledger.IsAdmin). Kept in MoonwardensDB.badgePoints.
+function BUI.ShowPoints()
+    return ns.db and ns.db.badgePoints and ns.Ledger and ns.Ledger.IsAdmin and ns.Ledger.IsAdmin(ns.meKey) or false
+end
+ns.tests.badgepoints = { usage = "on | off", help = "show badges' points on cards and tooltips (officers)", fn = function(arg)
+    if not (ns.Ledger and ns.Ledger.IsAdmin and ns.Ledger.IsAdmin(ns.meKey)) then
+        ns.print("Badge points are for officers to check.")
+        return
+    end
+    arg = (arg or ""):lower()
+    if arg ~= "on" and arg ~= "off" then
+        ns.print(("badge points are %s. /mw test badgepoints on | off"):format(BUI.ShowPoints() and "shown" or "hidden"))
+        return
+    end
+    ns.db.badgePoints = arg == "on" or nil
+    ns.print(arg == "on" and "Badge points shown on cards and tooltips." or "Badge points hidden.")
+    if BUI.Refresh then BUI.Refresh() end
+end }
+
+-- Under a badge's tooltip, its track: every tier, its goal in what it
+-- counts ("Copper 10,000 kills"), and what's earned of it.
+local function addTiers(track, res)
+    if not (track and res) then return end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine("Tiers", 1, 0.82, 0)
+    -- (a heading: 2 px over the tooltip's text)
+    if ns.UI and ns.UI.TooltipLineSize then
+        local _, size = GameTooltipText:GetFont()
+        ns.UI.TooltipLineSize(GameTooltip:NumLines(), math.floor((size or 12) + 0.5) + 2)
+    end
+    for _, b in ipairs(track.tiers) do
+        local e = res.badges[b.id] or { times = 0 }
+        local col = Badges.TIER_COLOR[b.tier]
+        local name = b.tier:sub(1, 1):upper() .. b.tier:sub(2)
+        local goal = b.kind == "placement" and ({ "1st", "2nd", "3rd" })[b.place] or commas(b.goal)
+        local unit = b.measure
+        if unit and b.kind ~= "placement" and b.goal == 1 then unit = unit:gsub("s$", "") end   -- ("1 capture")
+        local got = e.times > 0 and ((b.kind == "lifetime" or b.kind == "manual" or b.kind == "selflifetime")
+            and "earned" or ("x" .. e.times)) or "-"
+        local line = unit and ("%s %s %s"):format(name, goal, unit) or ("%s %s"):format(name, goal)
+        if BUI.ShowPoints() then line = line .. ("  (%d pts)"):format(b.points) end
+        GameTooltip:AddDoubleLine(line, got,
+            col[1], col[2], col[3], e.times > 0 and 0.12 or 0.5, e.times > 0 and 1 or 0.5, e.times > 0 and 0 or 0.5)
+    end
+    GameTooltip:Show()
+end
+
 local function badgeTooltip(owner, b, e)
     local deco = tipDecor()
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local c = Badges.TIER_COLOR[b.tier] or { 1, 0.82, 0 }
-    -- The points: a badge's own; a parent's, its children's.
+    -- (points hidden: the title alone; shown, the shield at the top right)
+    local showPts = BUI.ShowPoints()
     local pts = b.points or 0
     if b.kind == "parent" then
         pts = 0
         for _, cid in ipairs(b.children or {}) do local cb = Badges.Get(cid); pts = pts + (cb and cb.points or 0) end
     end
     local sw, sh = math.floor(35 * TIP_SHIELD * SHIELD_ART + 0.5), math.floor(51 * TIP_SHIELD * SHIELD_ART + 0.5)
-    GameTooltip:AddDoubleLine(Badges.Title(b), ("|A:Legacy-Tree-Frame-Points-Icon:%d:%d|a"):format(sh, sw), c[1], c[2], c[3], 1, 1, 1)
+    if showPts then
+        GameTooltip:AddDoubleLine(Badges.Title(b), ("|A:Legacy-Tree-Frame-Points-Icon:%d:%d|a"):format(sh, sw), c[1], c[2], c[3], 1, 1, 1)
+    else
+        GameTooltip:AddLine(Badges.Title(b), c[1], c[2], c[3])
+    end
     setIcon(tipIconTex, b.icon)
     local file = tipIconTex:GetTexture()
     local placed = file and pcall(GameTooltip.AddTexture, GameTooltip, file, {
@@ -459,7 +541,7 @@ local function badgeTooltip(owner, b, e)
     else
         deco.coin:Hide()
     end
-    local right = _G.GameTooltipTextRight1
+    local right = showPts and _G.GameTooltipTextRight1
     deco.points:ClearAllPoints()
     if right then
         font(deco.points, pts >= 100 and "GameFontHighlightSmall" or "GameFontHighlight")
@@ -834,6 +916,7 @@ local function newCard(parent)
     end)
     c.shield = newShield(c)
     c.shield:SetPoint("TOPRIGHT", -14, -26)
+    c.shield:Hide()                                   -- (no points shown on badges)
     c.dateBg = c:CreateTexture(nil, "OVERLAY")
     c.dateBg:SetPoint("TOPRIGHT", -6, -3)
     if not atlas(c.dateBg, "Legacy-Challenge-Cards-Date-BG", true) then c.dateBg:SetSize(1, 1) end
@@ -847,28 +930,8 @@ local function newCard(parent)
         if not self.badge then return end
         if not state.view and New.SeeCard(self.badge, self.track) then self.newDot:Hide() end
         badgeTooltip(self, self.badge, self.entry)
-        -- A track: every tier, its goal and points, and what's earned of it.
-        local st, res = self.track, self.result
-        if st and res then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Tiers", 1, 0.82, 0)
-            -- (a heading: 2 px over the tooltip's text)
-            if ns.UI and ns.UI.TooltipLineSize then
-                local _, size = GameTooltipText:GetFont()
-                ns.UI.TooltipLineSize(GameTooltip:NumLines(), math.floor((size or 12) + 0.5) + 2)
-            end
-            for _, b in ipairs(st.track.tiers) do
-                local e = res.badges[b.id]
-                local col = Badges.TIER_COLOR[b.tier]
-                local name = b.tier:sub(1, 1):upper() .. b.tier:sub(2)
-                local goal = b.kind == "placement" and ({ "1st", "2nd", "3rd" })[b.place] or commas(b.goal)
-                local got = e.times > 0 and ((b.kind == "lifetime" or b.kind == "manual" or b.kind == "selflifetime")
-                    and "earned" or ("x" .. e.times)) or "-"
-                GameTooltip:AddDoubleLine(("%s  %s  (%d pts)"):format(name, goal, b.points), got,
-                    col[1], col[2], col[3], e.times > 0 and 0.12 or 0.5, e.times > 0 and 1 or 0.5, e.times > 0 and 0 or 0.5)
-            end
-            GameTooltip:Show()
-        end
+        local st = self.track
+        if st then addTiers(st.track, self.result) end
     end)
     c:SetScript("OnLeave", function() GameTooltip:Hide() end)
     return c
@@ -885,10 +948,11 @@ local function newCriterion(parent)
     r.icon:SetPoint("LEFT", 4, 0)
     r.shield = newShield(r, 0.55, "GameFontHighlightSmall")
     r.shield:SetPoint("RIGHT", -26, -1)
+    r.shield:Hide()                                   -- (no points shown on badges)
     r.points = r.shield.points
     r.name = text(r, "SystemFont_Small2", "ARTWORK")
     r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
-    r.name:SetPoint("RIGHT", r.shield, "LEFT", -4, 0)
+    r.name:SetPoint("RIGHT", r, "RIGHT", -26, 0)
     r.name:SetWordWrap(false)
     r.check = r:CreateTexture(nil, "ARTWORK")
     if not atlas(r.check, "worldquest-tracker-checkmark", true) then r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready") end
@@ -1034,15 +1098,7 @@ local function fillCard(c, b, e, key, result, opts)
         c.plus:SetTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
     end
     if open and headed then
-        local first = kids[1] and Badges.Get(kids[1])
-        -- ("N points each" only when every child is worth the same)
-        local same = first ~= nil
-        for _, cid in ipairs(kids) do
-            local k = Badges.Get(cid)
-            if not (k and first and k.points == first.points) then same = false end
-        end
-        c.listHead:SetText(same and ("%s - %d points each"):format(b.listLabel or "Includes", first.points)
-            or (b.listLabel or "Includes"))
+        c.listHead:SetText(b.listLabel or "Includes")       -- (no points shown)
     end
     local w = (c:GetWidth() > 0 and c:GetWidth() or 500)
     local cw = math.floor((w - 40 - 10) / 2)
@@ -1064,6 +1120,12 @@ local function fillCard(c, b, e, key, result, opts)
             r.name:SetTextColor(r.done and 1 or 0.75, r.done and 1 or 0.75, r.done and 1 or 0.75)
             r.points:SetText(child.points)
             r.shield.icon:SetDesaturated(not r.done)
+            -- (points shown: the shield, the name up to it; else up to the check)
+            local sp = BUI.ShowPoints()
+            r.shield:SetShown(sp)
+            r.name:ClearAllPoints()
+            r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+            if sp then r.name:SetPoint("RIGHT", r.shield, "LEFT", -4, 0) else r.name:SetPoint("RIGHT", r, "RIGHT", -26, 0) end
             r.check:SetShown(r.done)
             r:Show()
         elseif r then
@@ -1075,6 +1137,7 @@ local function fillCard(c, b, e, key, result, opts)
     c.info:SetPoint("RIGHT", c, "RIGHT", -70, 0)
     -- (a parent's shield: the points its children have earned)
     c.shield.points:SetText(b.kind == "parent" and (e.childPoints or 0) or b.points)
+    c.shield:SetShown(BUI.ShowPoints())
     c.shield.icon:SetDesaturated(not lit)
     c.dateBg:SetShown(earned)
     c.check:SetShown(earned)
@@ -1282,12 +1345,20 @@ local function markTarget(bd, to, i)
     end
 end
 
+-- A board icon's tooltip: the badge, then (a tier track) all its tiers,
+-- as on its card - the board shows one tier of a track only.
+local function cellTooltip(c)
+    badgeTooltip(c, c.badge, c.entry)
+    local args = c.board and c.board.args
+    if c.badge.track and args then addTiers(Badges.TRACKS[c.badge.track], args[2]) end
+end
+
 -- Let go: the tooltip of the icon now under the cursor (the cursor never
 -- "entered" it, so it wouldn't show by itself).
 local function tipUnderCursor(bd)
     for _, list in ipairs({ bd.slots, bd.cells }) do
         for _, c in ipairs(list) do
-            if c.badge and c:IsShown() and over(c, bd.clip) then badgeTooltip(c, c.badge, c.entry); return end
+            if c.badge and c:IsShown() and over(c, bd.clip) then cellTooltip(c); return end
         end
     end
 end
@@ -1416,8 +1487,8 @@ local function newBoardCell(bd, size, countFont)
     c.newDot = New.Dot(c.icon, math.max(10, math.floor(size * 0.22)), "TOPRIGHT", -size * 0.14, -size * 0.14)
     c:SetScript("OnEnter", function(self)
         if not (self.badge and not drag) then return end
-        if bd.editable and New.See({ self.badge.id }) then self.newDot:Hide() end
-        badgeTooltip(self, self.badge, self.entry)
+        if bd.editable and (self.locked and New.See({ self.badge.id }) or (not self.locked and New.SeeShown(self.badge))) then self.newDot:Hide() end
+        cellTooltip(self)
     end)
     c:SetScript("OnLeave", function() GameTooltip:Hide() end)
     c:SetScript("OnClick", function(self)
@@ -1466,7 +1537,7 @@ local function fillCell(c, it, frac)
         c.fill:Hide(); c.fillGlow:Hide(); c.fillTop:Hide()
     end
     c:SetAlpha((drag and it and drag.id == it.b.id) and 0.35 or 1)
-    c.newDot:SetShown(c.board and c.board.editable and it and New.Is(it.b.id) or false)
+    c.newDot:SetShown(c.board and c.board.editable and it and (c.locked and New.Is(it.b.id) or (not c.locked and New.IsShown(it.b))) or false)
 end
 
 -- opts: tile, tileGap (the Showcase's icons), icon, gap (the Collection's),
@@ -1674,6 +1745,13 @@ local function build(f)
     f.chest:SetPoint("BOTTOMLEFT", 8, 4)
     f.chest:SetText("Inspect Badges")
     f.chest:SetScript("OnClick", function() if ns.BadgeChest then ns.BadgeChest.Open(ns.meKey) end end)
+    -- Badge Management (officers): stacked above it, for those who may award.
+    f.manage = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.manage:SetSize(f.catW - 8, 26)
+    f.manage:SetPoint("BOTTOMLEFT", f.chest, "TOPLEFT", 0, 2)
+    f.manage:SetText("Badge Management")
+    f.manage:SetScript("OnClick", function() if ns.OfficerUI and ns.OfficerUI.Toggle then ns.OfficerUI.Toggle() end end)
+    f.manage:Hide()
 
     f.divider = f:CreateTexture(nil, "ARTWORK")
     f.divider:SetPoint("TOPLEFT", f.catW + 8, 4)
@@ -1732,6 +1810,10 @@ local function refresh(f)
     -- (a category switched off or gone since it was last open: back to the Overview)
     if Badges.CategorySoon(state.cat) or not Badges.IsPage(state.cat) then state.cat = "overview"; if saved then saved.cat = "overview" end end
     f.testBanner:SetShown(ns.Ledger and ns.Ledger.Testing() and true or false)
+    -- (Badge Management: only for those who may award; the list makes room)
+    local manage = ns.Ledger and ns.Ledger.CanAward() and ns.OfficerUI and true or false
+    f.manage:SetShown(manage)
+    f.catHolder:SetPoint("BOTTOMLEFT", 4, manage and 62 or 34)
     refreshCats(f)
     local key = state.view
     local result = key and Badges.Of(key) or Badges.Mine()

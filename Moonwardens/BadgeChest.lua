@@ -30,7 +30,7 @@ local PICKS = 8         -- names suggested while typing
 -- How the Collection is shown (Badges.SORTS; "arranged": as they arranged it).
 local function sortId()
     local s = ns.db and ns.db.chestSort
-    for _, o in ipairs(Badges.SORTS) do if o.id == s then return s end end
+    for _, o in ipairs(Badges.SORTS) do if o.id == s and not o.hidden then return s end end   -- (a hidden one: as arranged)
     return "arranged"
 end
 
@@ -120,8 +120,10 @@ local function build()
         dd:SetWidth(170)
         dd:SetupMenu(function(_, root)
             for _, o in ipairs(Badges.SORTS) do
-                root:CreateRadio(o.text, function(id) return sortId() == id end,
-                    function(id) if ns.db then ns.db.chestSort = id end; Chest.Refresh() end, o.id)
+                if not o.hidden then
+                    root:CreateRadio(o.text, function(id) return sortId() == id end,
+                        function(id) if ns.db then ns.db.chestSort = id end; Chest.Refresh() end, o.id)
+                end
             end
         end)
         dd:HookScript("OnEnter", function(self)
