@@ -758,7 +758,7 @@ local function build(f)
     sb:SetSize(220, 20)
     sb:SetPoint("TOPRIGHT", -6, -4)
     sb:SetAutoFocus(false)
-    if sb.Instructions then sb.Instructions:SetText("Filter: name, badge, note") end
+    if type(sb.Instructions) == "table" and sb.Instructions.SetText then sb.Instructions:SetText("Filter: name, badge, note") end
     sb:HookScript("OnTextChanged", function(self)
         local t = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
         if t ~= state.filter then state.filter = t; OUI.Refresh() end

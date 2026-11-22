@@ -270,6 +270,8 @@ function UI.MinimapTooltip(tt)
         local text, r, g, b = ns.Layer.TooltipLine()
         if text then tt:AddLine(text, r, g, b) end
     end
+    local update = ns.Comm.Version and ns.Comm.Version.TooltipLine()
+    if update then tt:AddLine(update, 0.12, 1, 0) end
     tt:AddLine("Click: settings", 0.62, 0.62, 0.62)
     tt:AddLine("Drag: move this button", 0.62, 0.62, 0.62)
 end

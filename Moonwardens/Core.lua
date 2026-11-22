@@ -1,6 +1,6 @@
 -- Core: namespace, saved settings, events, timers, safe reads, slash command.
 local ADDON, ns = ...
-ns.VERSION = "0.6.0-test"
+ns.VERSION = "0.6.0"
 _G.Moonwardens = ns -- for /dump and other addons; nothing reads it back
 
 ---------------------------------------------------------------------------
@@ -79,10 +79,10 @@ local function applyDefaults(db)
         if db[k] == nil then db[k] = v end
     end
     db.char = db.char or {}
-    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}. Back on the
-    -- 0.5 Tuesday weeks in `board` for now; 0.6's Sunday weeks in `weeks`
-    -- are left as they are, unused, for when they come back.
+    -- Leaderboard: week -> key -> {n=name, c=count, cls=class}, Tuesday weeks.
+    -- (0.6.0-test's Sunday weeks in db.weeks are carried back at login.)
     db.board = db.board or {}
+    db.kills = db.kills or {}   -- my kill log: character key -> list (Leaderboard.lua)
     db.data = db.data or {}     -- research log
     db.schema = 1
 end

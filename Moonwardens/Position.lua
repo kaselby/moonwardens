@@ -179,7 +179,8 @@ local seenAt = {}              -- key -> time I last saw them
 local function noteSeen(unit)
     if ns.try(UnitIsPlayer, unit) ~= true then return end
     local key = unitKey(unit)
-    if key and ns.Roster.Get(key) then seenAt[key] = ns.now() end
+    if not (key and ns.Roster.Get(key)) then return end
+    seenAt[key] = ns.now()
 end
 
 local function scanPlayerPlates()
@@ -190,6 +191,8 @@ local function scanPlayerPlates()
         local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
         if u then noteSeen(u) end
     end
+    -- A guildie kept as target or focus stays "seen" (no event while held).
+    noteSeen("target"); noteSeen("focus")
 end
 
 function Position.SeenRecently(key)
@@ -228,7 +231,9 @@ function Position.LayersIn(map)
             list[#list + 1] = { label = ("Layer %d%s"):format(e.n, e.n == myN and " - yours" or ""), n = #e.keys,
                 keys = e.keys, mine = e.n == myN, sub = e.leads > 0 and (e.leads .. " probable") or "" }
         end
-        if #list > 0 or #loose > 0 then return list, #loose, loose end
+        -- (only once some are agreed: before that, "Your layer" / "Another
+        -- layer" below, from what's known of each guildie)
+        if #list > 0 then return list, #loose, loose end
     end
     local yours = { label = "Your layer", n = 0, keys = {}, mine = true, leads = 0 }
     local other = { label = "Another layer", n = 0, keys = {}, leads = 0 }

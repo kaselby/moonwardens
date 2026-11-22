@@ -1,5 +1,10 @@
--- Leaderboard: Horde players killed in Ashenvale, per week, shared through the guild.
+-- Leaderboard: Horde players killed in Ashenvale and at Stonetalon Peak, per
+-- week, shared through the guild.
 -- Any kill counts, honorable or not (Krylea, 11-09): grey-level Horde too.
+-- Weeks run on the game's Tuesday reset, the same weeks and messages as 0.5,
+-- so every version shares one board. Sunday weeks (Krylea, 11-15) are on hold
+-- until every kill is logged with its time (Krylea, 11-19: then any rule
+-- change can be recounted exactly). The log is below: db.kills.
 -- H|1|week|count            GUILD: my own count this week
 -- HQ|1|week|attempt         GUILD: "send me the board"; one elected member replies
 -- HS|1|week|Name:n,Name:n   WHISPER: the board, in chunks under 255 bytes
@@ -9,9 +14,12 @@ local LB = {}
 ns.Leaderboard = LB
 
 local ASHENVALE = 1440
+local STONETALON = 1442
+local PEAK = "Stonetalon Peak"   -- the subzone; the rest of Stonetalon doesn't count
 local WEEK = 604800
 -- A known reset: Tuesday 2024-01-02 15:00 UTC (US weekly reset).
 local ANCHOR = 1704207600
+local SUNDAY_ANCHOR = 1704639600   -- 0.6.0-test's Sunday weeks (carried back once)
 local DEBOUNCE = 30       -- seconds between my H broadcasts
 local RECENT = 300        -- a member heard from within this counts as "online with the addon"
 
@@ -24,7 +32,7 @@ local gotHS = false
 -- Weeks
 ---------------------------------------------------------------------------
 -- Server time of the next weekly reset. Probes the client API, else assumes
--- Tuesday 15:00 UTC.
+-- Tuesday 15:00 UTC. (As 0.5: the week ids must match.)
 function LB.NextReset()
     local now = ns.try(GetServerTime) or time()
     local secs = C_DateAndTime and ns.try(C_DateAndTime.GetSecondsUntilWeeklyReset)
@@ -44,8 +52,12 @@ function LB.WeekStart(week) return ANCHOR + week * WEEK end
 -- The week a moment `t` falls in.
 function LB.WeekOf(t) return math.floor((t - ANCHOR) / WEEK) end
 
+local function board()
+    return ns.db.board
+end
+
 local function weekTable(week)
-    local b = ns.db.board
+    local b = board()
     b[week] = b[week] or {}
     return b[week]
 end
@@ -53,8 +65,9 @@ end
 -- Keep only this week and last week.
 local function prune()
     local w = LB.Week()
-    for k in pairs(ns.db.board) do
-        if type(k) ~= "number" or k < w - 1 or k > w + 1 then ns.db.board[k] = nil end
+    local b = board()
+    for k in pairs(b) do
+        if type(k) ~= "number" or k < w - 1 or k > w + 1 then b[k] = nil end
     end
 end
 
@@ -75,7 +88,7 @@ function LB.Set(week, key, count, name)
 end
 
 function LB.Mine(week)
-    local t = ns.db.board[week or LB.Week()]
+    local t = board()[week or LB.Week()]
     local e = t and ns.meKey and t[ns.meKey]
     return e and e.c or 0
 end
@@ -83,13 +96,19 @@ end
 ---------------------------------------------------------------------------
 -- Counting my kills
 ---------------------------------------------------------------------------
-local function inAshenvale()
+-- Ashenvale, or the Stonetalon Peak subzone of Stonetalon Mountains.
+local function counts()
     local inside, kind = ns.try(IsInInstance)
     if inside == true and kind ~= "none" then return false end
     local map = ns.try(C_Map.GetBestMapForUnit, "player")
-    if map == ASHENVALE then return true end
-    return ns.try(GetZoneText) == "Ashenvale"
+    local zone = ns.try(GetZoneText)
+    if map == ASHENVALE or zone == "Ashenvale" then return true end
+    if map == STONETALON or zone == "Stonetalon Mountains" then
+        return ns.try(GetSubZoneText) == PEAK or ns.try(GetMinimapZoneText) == PEAK
+    end
+    return false
 end
+LB.Counts = counts
 
 local function scheduleH()
     if sendPending then return end
@@ -109,30 +128,90 @@ end
 --  * GetPVPSessionStats() honorable kills. PLAYER_PVP_KILLS_CHANGED fires
 --    twice per kill, so we count the counter's rise, never the events.
 -- The same kill usually shows up in both, within a second or two. Each
--- counted kill waits up to MATCH seconds for its twin from the other source;
--- a twin that arrives is absorbed, not counted again.
+-- kill waits up to MATCH seconds for its twin from the other source; a twin
+-- that arrives is absorbed (it only adds what it knows to the log entry).
+--
+-- Every kill is logged, wherever it happened (Krylea, 11-19), so any future
+-- rule (other weeks, other zones) can be recounted exactly:
+-- db.kills[my key] = list of {
+--   t = server time, m = map id, z = zone, sz = subzone, i = 1 if in an instance,
+--   s = "p" (party kill), "h" (honour counter) or "ph" (both),
+--   k = 1 if it counted on the leaderboard,
+--   g = victim GUID, v = victim name, c = victim class (file), r = race,
+--   by = who struck it, when not me }
+-- Victim fields only come with a party kill, and only when readable.
 local MATCH = 10
-local fromParty, fromHK = {}, {}   -- times of counted kills still waiting for a twin
+local LOG_MAX = 50000              -- per character; oldest dropped beyond this
+local fromParty, fromHK = {}, {}   -- { at, e } of logged kills still waiting for a twin
 
-local function absorb(list)
+-- The oldest waiting kill from the other source that counted the same way
+-- (a kill just over a zone border must not swallow one inside it).
+local function absorb(list, counted)
     local now = ns.now()
-    while list[1] and now - list[1] > MATCH do table.remove(list, 1) end
-    if list[1] then table.remove(list, 1); return true end
-    return false
+    while list[1] and now - list[1].at > MATCH do table.remove(list, 1) end
+    for i = 1, #list do
+        if (list[i].e.k == 1) == counted then return table.remove(list, i) end
+    end
 end
 
-local function count(from, other)
-    if absorb(other) then return end
-    from[#from + 1] = ns.now()
-    LB.Add(1)
+local function str(v)
+    if type(v) == "string" and ns.readable(v) and v ~= "" then return v end
+end
+
+local function victimInfo(guid, attacker, e)
+    e.g = str(guid)
+    if e.g and GetPlayerInfoByGUID then
+        local ok, _, class, _, race, _, name, realm = pcall(GetPlayerInfoByGUID, e.g)
+        if ok then
+            e.c, e.r, e.v = str(class), str(race), str(name)
+            if e.v and str(realm) then e.v = e.v .. "-" .. realm end
+        end
+    end
+    if str(attacker) and attacker ~= ns.try(UnitGUID, "player") and GetPlayerInfoByGUID then
+        local ok, _, _, _, _, _, name = pcall(GetPlayerInfoByGUID, attacker)
+        if ok then e.by = str(name) end
+    end
+end
+
+function LB.Log()
+    if not (ns.db and ns.meKey) then return {} end
+    ns.db.kills[ns.meKey] = ns.db.kills[ns.meKey] or {}
+    return ns.db.kills[ns.meKey]
+end
+
+local function kill(src, guid, attacker)
+    local counted = counts()
+    local twin = absorb(src == "p" and fromHK or fromParty, counted)
+    if twin then
+        twin.e.s = "ph"
+        if src == "p" then victimInfo(guid, attacker, twin.e) end
+        return
+    end
+    local inside, kind = ns.try(IsInInstance)
+    local e = {
+        t = ns.try(GetServerTime) or time(),
+        m = ns.try(C_Map.GetBestMapForUnit, "player"),
+        z = str(ns.try(GetZoneText)), sz = str(ns.try(GetSubZoneText)),
+        i = (inside == true and kind ~= "none") and 1 or nil,
+        s = src,
+    }
+    if type(e.m) ~= "number" then e.m = nil end
+    if src == "p" then victimInfo(guid, attacker, e) end
+    if counted then e.k = 1 end
+    local log = LB.Log()
+    log[#log + 1] = e
+    while #log > LOG_MAX do table.remove(log, 1) end
+    local list = src == "p" and fromParty or fromHK
+    list[#list + 1] = { at = ns.now(), e = e }
+    if e.k then LB.Add(1) end
 end
 
 function LB.PartyKill(attacker, victim)
     if type(victim) ~= "string" or not ns.readable(victim) then return end
-    -- Only players. In open-world Ashenvale every player who can die to us is
-    -- Horde (no duels to the death, no free-for-all areas).
-    if victim:sub(1, 7) ~= "Player-" or not inAshenvale() then return end
-    count(fromParty, fromHK)
+    -- Only players. In open-world Ashenvale and Stonetalon every player who
+    -- can die to us is Horde (no duels to the death, no free-for-all areas).
+    if victim:sub(1, 7) ~= "Player-" then return end
+    kill("p", victim, attacker)
 end
 
 -- Kills on the HK counter from before login are not ours to count (we don't
@@ -143,9 +222,7 @@ function LB.Read()
     if lastCounter == nil then lastCounter = kills; return end -- baseline at login
     local d = kills >= lastCounter and kills - lastCounter or kills -- a drop = daily reset to 0
     lastCounter = kills
-    if d > 0 and inAshenvale() then
-        for _ = 1, d do count(fromHK, fromParty) end
-    end
+    for _ = 1, d do kill("h") end
 end
 
 function LB.Add(n)
@@ -180,7 +257,7 @@ end
 
 -- Board for one week as "Name-Surname:n" chunks, each message under 255 bytes.
 function LB.Chunks(week)
-    local t = ns.db.board[week]
+    local t = board()[week]
     if not t then return {} end
     local entries = {}
     for key, e in pairs(t) do
@@ -239,6 +316,29 @@ ns.Comm.handlers.HS = function(f, sender)
 end
 
 ---------------------------------------------------------------------------
+-- 0.6.0-test kept Sunday weeks in db.weeks (Krylea and testers only). Once:
+-- each into the Tuesday week that holds most of it (Sunday + 2 days), as a
+-- claim like any other, then dropped.
+---------------------------------------------------------------------------
+function LB.CarryBack()
+    local weeks = ns.db.weeks
+    ns.db.weeks, ns.db.oldBoard = nil, nil
+    if type(weeks) ~= "table" then return end
+    for w, t in pairs(weeks) do
+        w = tonumber(w)
+        if w and type(t) == "table" then
+            local target = math.floor((SUNDAY_ANCHOR + w * WEEK + 2 * 86400 - ANCHOR) / WEEK)
+            for key, e in pairs(t) do
+                if type(e) == "table" and LB.Set(target, key, e.c, e.n) then
+                    local mine = weekTable(target)[key]
+                    if mine and not mine.cls then mine.cls = e.cls end
+                end
+            end
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Page
 ---------------------------------------------------------------------------
 local ROWS = 18             -- at most; fewer when the page is shorter
@@ -255,7 +355,7 @@ end
 -- Sorted rows for a week: only guild members (when the roster is known).
 function LB.Rows(week)
     local rows = {}
-    for key, e in pairs(ns.db.board[week] or {}) do
+    for key, e in pairs(board()[week] or {}) do
         local m = ns.Roster.Get(key)
         if e.c > 0 and (m or not ns.Roster.Loaded()) then
             rows[#rows + 1] = { key = key, name = m and m.name or e.n, c = e.c,
@@ -386,8 +486,8 @@ local function refresh(f)
     local resetAt = LB.NextReset()
     local left = resetAt - (ns.try(GetServerTime) or time())
     if f.week == 0 then
-        f.sub:SetText(("Resets %s at server reset  -  %s left  -  guild total |cffffd100%d|r"):format(
-            date("%A", resetAt), duration(left), total))
+        f.sub:SetText(("Ashenvale and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
+            duration(left), total))
     else
         f.sub:SetText(("Final standings  -  guild total |cffffd100%d|r"):format(total))
     end
@@ -415,13 +515,13 @@ local function refresh(f)
         end
     end
     if #rows == 0 then
-        f.empty:SetText(f.week == 0 and "No kills in Ashenvale yet this week.\nGo find some Horde."
+        f.empty:SetText(f.week == 0 and "No kills yet this week.\nGo find some Horde."
             or "Nothing recorded for last week.")
         f.empty:Show()
     else
         f.empty:Hide()
     end
-    local foot = "Counts Horde killed in Ashenvale by you or your group, honour or not. Only members with the addon appear."
+    local foot = "Counts Horde killed in Ashenvale or at Stonetalon Peak by you or your group, honour or not. Weeks run from the Tuesday reset. Only members with the addon appear."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
@@ -441,6 +541,7 @@ ns.UI.AddPage(5, "Leaderboard", build, refresh,
 -- Startup
 ---------------------------------------------------------------------------
 ns.onLogin(function()
+    LB.CarryBack()
     prune()
     LB.Read() -- sets the baseline; kills from before login don't count
     ns:On("PLAYER_PVP_KILLS_CHANGED", LB.Read)
@@ -453,3 +554,19 @@ ns.onLogin(function()
         ns.after(20, function() if not gotHS then request(2) end end, "hk retry")
     end, "hk login")
 end, "leaderboard")
+
+ns.slash.hk = { help = "my Horde kills this week (Ashenvale and Stonetalon Peak)", fn = function()
+    ns.print(("%d Horde kills this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
+end }
+
+-- /mw kills: the last few entries of my kill log, to check it's recording.
+ns.slash.kills = { help = "my last kills from the kill log", fn = function()
+    local log = LB.Log()
+    ns.print(("%d kills logged on this character."):format(#log))
+    for i = math.max(1, #log - 4), #log do
+        local e = log[i]
+        local who = e.v or (e.g and "a player") or "unknown"
+        ns.print(("  %s  %s%s  %s%s%s"):format(date("%m-%d %H:%M", e.t), e.z or "?", e.sz and (" / " .. e.sz) or "",
+            who, e.c and (" (" .. e.c .. ")") or "", e.k and "" or "  [not counted]"))
+    end
+end }

@@ -1663,7 +1663,7 @@ local function build(f)
             if f.scroll then f.scroll:ScrollTo(0) end
         end
     end)
-    if sb.Instructions then sb.Instructions:SetText("Search badges") end
+    if type(sb.Instructions) == "table" and sb.Instructions.SetText then sb.Instructions:SetText("Search badges") end
     f.search = sb
 
     f.catHolder = CreateFrame("Frame", nil, f)

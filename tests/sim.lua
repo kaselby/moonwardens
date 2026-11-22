@@ -58,15 +58,14 @@ W.advance(1)
 check(#W.sent == 2 and W.sent[1].m == "P|1|3", "queue drained, latest position sent")
 check(W.sent[2].at - W.sent[1].at >= 0.25 - 1e-9, "spacing")
 
--- UI builds and opens
+-- UI builds and opens. (The pages live on the guild window when it can
+-- host them; the mock has none, so here it's our own window, the fallback.)
+ns.GuildTabs.Hosting = function() return false end
 ns.ToggleWindow()
 check(MoonwardensFrame and MoonwardensFrame:IsShown(), "window opens")
-do
-    local texts = {}
-    for _, fr in ipairs(W.frames) do if fr._kind == "FontString" and fr._text then texts[#texts + 1] = tostring(fr._text) end end
-    local all = table.concat(texts, "\n")
-    check(all:find("2  |cff9d9d9d67%|r", 1, true) and all:find("1  |cff9d9d9d25%|r", 1, true) and all:find("\n50%\n", 1, true) , "stats show count and percent")
-end
+-- (The guild's race, class and level stats were the Stats page; they're on
+-- the guild window's Info tab now - GuildInfoStats.lua - which the mock
+-- doesn't have, so they aren't checked here.)
 ns.ToggleWindow(9)
 check(MoonwardensFrame.current == 9, "settings page")
 W.missingTemplates = { PortraitFrameTemplate = true }
@@ -148,8 +147,9 @@ W.advance(1.5)
 recv("P|1|1440|0.4000|0.6000|7|0|60", "Thalanor-Oakheart")
 recv("P|1|1440|0.4500|0.5000|3|0|33", "Caelith-Shade")
 local list, unknown = P.LayersIn(1440)
-check(#list == 2 and list[1].layer == 3 and list[1].label == "Layer 1" and list[2].label == "Layer 2" and list[2].mine
-    and list[2].n == 2 and unknown == 0, "layers in zone, labelled by rank")
+check(#list == 2 and list[1].label == "Your layer" and list[1].mine and list[1].n == 2
+    and list[2].label == "Another layer" and not list[2].mine and list[2].n == 1 and unknown == 0,
+    "layers in zone: yours and another (no agreed numbers yet)")
 check(P.Relation(P.Get("thalanor oakheart")) == "same" and P.Relation(P.Get("caelith shade")) == "other", "relation same/other")
 recv("P|1|1440|0.4500|0.5000|0|0|33", "Caelith-Shade")
 check(P.Relation(P.Get("caelith shade")) == "unknown", "relation unknown")
@@ -173,21 +173,24 @@ check(tdot and tdot._point[2] == root and tdot._point[3] == "TOPLEFT"
     and math.abs(tdot._point[4] - 400) < 1e-6 and math.abs(tdot._point[5] + 0.6 * 667) < 1e-6, "dot placed on the canvas")
 check(tdot.rel == "same" and tdot:GetAlpha() == 0.8, "same layer dot: slightly faint (0.8)")
 check(panel and panel:IsShown() and panel.head:GetText() == "Layers in Ashenvale", "side panel heading")
-check(panel.cards[1].name:GetText() == "Layer 1" and panel.cards[2].name:GetText():find("Layer 2", 1, true)
-    and panel.cards[2].name:GetText():find("you", 1, true) and panel.cards[2].count:GetText() == "2 guildies", "layer cards")
+check(panel.cards[1] and panel.cards[1].name:GetText() == "Your layer" and panel.cards[1].count:GetText() == "2 guildies"
+    and panel.cards[2] and panel.cards[2].name:GetText() == "Another layer" and panel.cards[2].count:GetText() == "1 guildie",
+    "layer cards")
 -- Hovering a layer card lists who is on it
-panel.cards[2]._scripts.OnEnter(panel.cards[2])
-local ctip = table.concat(GameTooltip.lines, "\n")
-check(ctip:find("Layer 2 (yours)", 1, true) and ctip:find("Thalanor Oakheart  level 60", 1, true)
-    and ctip:find("Sanalune Silverwind  you", 1, true) and not ctip:find("Caelith", 1, true), "layer card tooltip: " .. ctip)
-panel.cards[2]._scripts.OnLeave(panel.cards[2])
+if panel.cards[1] then
+    panel.cards[1]._scripts.OnEnter(panel.cards[1])
+    local ctip = table.concat(GameTooltip.lines, "\n")
+    check(ctip:find("Your layer", 1, true) and ctip:find("Thalanor Oakheart  level 60", 1, true)
+        and ctip:find("Sanalune Silverwind  you", 1, true) and not ctip:find("Caelith", 1, true), "layer card tooltip: " .. ctip)
+    panel.cards[1]._scripts.OnLeave(panel.cards[1])
+end
 
 -- Hover
 GameTooltip:Hide() -- (nobody else's tooltip up: ours steps back for those)
 W.cursor = { tdot._cx + 3, tdot._cy - 2 }
 W.advance(0.1)
 local tip = table.concat(GameTooltip.lines, "\n")
-check(GameTooltip:GetOwner() ~= nil and tip:find("Thalanor Oakheart", 1, true) and tip:find("Layer 2 (same as you)", 1, true)
+check(GameTooltip:GetOwner() ~= nil and tip:find("Thalanor Oakheart", 1, true) and tip:find("Your layer", 1, true)
     and tip:find("<Moonwardens> Sentinel", 1, true), "hover tooltip")
 W.cursor = { 0, 0 }
 W.advance(0.1)
@@ -282,6 +285,10 @@ W.unitPos = nil
 WorldMapFrame:Hide(); W.advance(0.1)
 SlashCmdList.MOONWARDENS("test mapdots on")
 check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test mapdots on")
+W.advance(70)
+check(P.CountInMyZone() == 2, "test dots stay until turned off")
+SlashCmdList.MOONWARDENS("test mapdots off")
+check(P.CountInMyZone() == 0 and W.prints[#W.prints]:find("test dots off", 1, true), "/mw test mapdots off")
 
 ---------------------------------------------------------------------------
 -- Phase 3: layer detector
@@ -291,11 +298,8 @@ local function npc(server, spawn) return ("Creature-0-%d-1-2-3346-%s"):format(se
 local layerEvents = {}
 ns.listen("LAYER", function(map, from, to) layerEvents[#layerEvents + 1] = { map, from, to } end)
 W.fire("PLAYER_ENTERING_WORLD")
-W.advance(2)
+W.advance(4)   -- (past the first 3 s after a loading screen)
 check(Lr.Mine(1440) == 0, "unknown at start")
-W.units.target = { guid = npc(7075, "A1") }
-W.fire("PLAYER_TARGET_CHANGED"); W.fire("PLAYER_TARGET_CHANGED")
-check(Lr.Mine(1440) == 0, "same NPC twice is not enough")
 W.units.mouseover = { guid = "Pet-0-7052-1-2-1234-B1", pc = true }
 W.fire("UPDATE_MOUSEOVER_UNIT")
 W.units.mouseover = { guid = npc(7052, "B2"), pc = true }    -- a player's guardian
@@ -303,48 +307,87 @@ W.fire("UPDATE_MOUSEOVER_UNIT")
 W.units.mouseover = { guid = "Player-0-7052-0001" }
 W.fire("UPDATE_MOUSEOVER_UNIT")
 check(Lr.Mine(1440) == 0, "pets, guardians and players ignored")
+W.units.mouseover = nil
+-- One creature: a provisional layer; a second agreeing one confirms it.
+W.units.target = { guid = npc(7075, "A1") }
+W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075 and Lr.State().single and layerEvents[#layerEvents][3] == 7075, "one creature gives a provisional layer")
+W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.State().single, "the same creature twice doesn't confirm it")
 W.units.mouseover = { guid = npc(7075, "A2") }
 W.fire("UPDATE_MOUSEOVER_UNIT")
-check(Lr.Mine(1440) == 7075 and layerEvents[#layerEvents][3] == 7075, "two NPCs confirm the layer")
+check(Lr.Mine(1440) == 7075 and not Lr.State().single, "a second creature confirms it")
 check(Lr.Mine(1439) == 0, "layer is per zone")
 W.advance(1.5)
 check(lastSent("P").m:match("^P|1|1440|[%d.]+|[%d.]+|7075|"), "P carries the layer: " .. lastSent("P").m)
--- A different number: one NPC is not enough, two are
+-- A confirmed layer: another number needs 3 of the last 5 creatures.
 W.units.n1 = { guid = npc(7062, "C1") }
 W.plates = { "n1" }
 W.advance(2.1)
-check(Lr.Mine(1440) == 7075, "one NPC with a new number doesn't switch")
+check(Lr.Mine(1440) == 7075, "one creature with a new number doesn't switch")
 W.fire("NAME_PLATE_UNIT_ADDED", "n1")
-check(Lr.Mine(1440) == 7075, "same NPC again doesn't switch")
+check(Lr.Mine(1440) == 7075, "the same creature again doesn't count twice")
 W.units.target = { guid = npc(7062, "C2") }
 W.fire("PLAYER_TARGET_CHANGED")
-check(Lr.Mine(1440) == 7062, "second NPC switches")
+check(Lr.Mine(1440) == 7075, "two don't switch a confirmed layer")
+W.units.mouseover = { guid = npc(7062, "C3") }
+W.fire("UPDATE_MOUSEOVER_UNIT")
+check(Lr.Mine(1440) == 7062, "three of the last five switch it")
 W.plates = {}
--- Tooltip, panel label
+-- Tooltip: a guildie here on my layer
+recv("P|1|1440|0.4000|0.6000|7062|0|60", "Thalanor-Oakheart")
 MoonwardensMinimapButton._scripts.OnEnter(MoonwardensMinimapButton)
-check(table.concat(GameTooltip.lines, "\n"):find("Your layer: Layer %d+"), "minimap tooltip layer line: " .. table.concat(GameTooltip.lines, " / "))
--- Zone change and shard transfer forget it
+check(table.concat(GameTooltip.lines, "\n"):find("On your layer here: 1 guildie", 1, true), "minimap tooltip layer line: " .. table.concat(GameTooltip.lines, " / "))
+-- A zone border forgets it; one creature isn't believed just after one.
+-- (Not in the first 10 s after a login: that's the login's own zone.)
+W.advance(10)
 W.fire("ZONE_CHANGED_NEW_AREA")
-check(Lr.Mine(1440) == 0, "forgotten on zone change")
-W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
-W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
-check(Lr.Mine(1440) == 7075, "re-confirmed")
--- Shard transfer: the layer is kept, and the next NPC settles it.
+check(Lr.Mine(1440) == 0, "forgotten at a zone border")
+W.units.target = { guid = npc(7075, "A4") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 0, "one creature isn't believed just after a border")
+W.units.mouseover = { guid = npc(7075, "A5") }; W.fire("UPDATE_MOUSEOVER_UNIT")
+check(Lr.Mine(1440) == 7075, "two agreeing creatures are")
+W.advance(16)
+-- A layer move: kept, and rechecked: a creature right after it doesn't
+-- decide; once the move has settled (3 s), one new creature does.
 W.fire("SHARD_TRANSFER")
-check(Lr.Mine(1440) == 7075, "kept through shard transfer (rechecking)")
+check(Lr.Mine(1440) == 7075, "kept through a layer move (rechecking)")
+W.advance(1)
 W.units.target = { guid = npc(7062, "B1") }; W.fire("PLAYER_TARGET_CHANGED")
-check(Lr.Mine(1440) == 7062, "one NPC replaces it after a shard transfer")
+check(Lr.Mine(1440) == 7075, "a creature just after a move doesn't decide yet")
+W.advance(3)
+W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7062, "once the move has settled, it decides")
 W.fire("SHARD_TRANSFER")
-W.units.target = { guid = npc(7075, "A1") }; W.fire("PLAYER_TARGET_CHANGED")
+W.advance(4)
+W.units.target = { guid = npc(7075, "A6") }; W.fire("PLAYER_TARGET_CHANGED")
 check(Lr.Mine(1440) == 7075, "and back again")
-W.units.target = { guid = npc(7062, "B2") }; W.fire("PLAYER_TARGET_CHANGED")
-check(Lr.Mine(1440) == 7075, "outside a recheck one NPC still doesn't switch")
-W.units.target = { guid = npc(7075, "A3") }; W.fire("PLAYER_TARGET_CHANGED")
+-- (provisional now, on one creature: it takes two of another number to correct)
+W.units.target = { guid = npc(7062, "B3") }; W.fire("PLAYER_TARGET_CHANGED")
+check(Lr.Mine(1440) == 7075, "outside a recheck one creature doesn't switch")
+W.units.mouseover = { guid = npc(7062, "B4") }; W.fire("UPDATE_MOUSEOVER_UNIT")
+check(Lr.Mine(1440) == 7062, "two of another number correct a provisional layer")
 W.advance(601)
 check(Lr.Mine(1440) == 0, "forgotten after 10 min")
 W.units = {}
+local printed = #W.prints
 SlashCmdList.MOONWARDENS("layer")
-check(W.prints[#W.prints]:find("experimental", 1, true), "/mw layer")
+check(table.concat(W.prints, "\n", printed + 1):find("isn't known yet", 1, true), "/mw layer")
+-- Seeing a guildie: they're on my layer (seeing them proves it).
+recv("P|1|1440|0.5010|0.5000|0|0|60", "Thalanor-Oakheart")
+W.units.target = { guid = "Player-0-7062-0002", name = "Thalanor Oakheart" }
+W.fire("PLAYER_TARGET_CHANGED")
+local tg = ns.Position.All()["thalanor oakheart"]
+check(ns.Position.Relation(tg) == "same", "unknown guildie I can see is on my layer")
+local ll, lunk = ns.Position.LayersIn(1440)
+local onMine = false
+for _, e in ipairs(ll) do if e.mine then for _, k in ipairs(e.keys) do if k == "thalanor oakheart" then onMine = true end end end end
+check(onMine and lunk == 0, "layer list puts them on my layer, not 'not known'")
+W.advance(40)   -- still targeted: the held target keeps counting
+check(ns.Position.Relation(tg) == "same", "held target still counts as seen")
+W.units = {}
+W.advance(40)
+check(ns.Position.Relation(tg) == "unknown", "out of sight for 30 s: unknown again")
 
 ---------------------------------------------------------------------------
 -- Phase 4: alerts
@@ -447,20 +490,20 @@ check(io.open("Moonwardens/Bindings.xml"):read("*a"):find("Moonwardens.Alert.Res
 ---------------------------------------------------------------------------
 local LB = ns.Leaderboard
 local WEEK = 604800
--- Week id: Sunday 15:00 UTC, whatever the game's own reset says
+-- Week id: fallback (Tuesday 15:00 UTC), and the client API agreeing with it
 local nr = LB.NextReset()
 local left = nr - GetServerTime()
-check(left > 0 and left <= WEEK and (nr - 1704639600) % WEEK == 0, "reset on the Sunday grid")
-check(os.date("!%A %H:%M", nr) == "Sunday 15:00", "reset is Sunday 15:00 UTC: " .. os.date("!%A %H:%M", nr))
+check(left > 0 and left <= WEEK and (nr - 1704207600) % WEEK == 0, "fallback reset on the Tuesday grid")
+check(os.date("!%A %H:%M", nr) == "Tuesday 15:00", "reset is Tuesday 15:00 UTC: " .. os.date("!%A %H:%M", nr))
 local wk = LB.Week()
-W.untilReset = left + 2 * 86400   -- the game's Tuesday reset: ignored now
-check(LB.Week() == wk and LB.NextReset() == nr, "game's weekly reset ignored")
+W.untilReset = left + 3 * 3600   -- a region resetting 3 h later
+check(LB.Week() == wk and LB.NextReset() == nr + 3 * 3600, "client reset API used, same week id")
 W.untilReset = nil
 -- Login HQ went out, and the retry (nobody answered)
 local hq1, hq2 = false, false
 for _, m in ipairs(W.sent) do
-    if m.m == "WQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
-    if m.m == "WQ|1|" .. wk .. "|2" then hq2 = true end
+    if m.m == "HQ|1|" .. wk .. "|1" then hq1 = m.ch == "GUILD" end
+    if m.m == "HQ|1|" .. wk .. "|2" then hq2 = true end
 end
 check(hq1 and hq2, "HQ on login, retry when no HS")
 -- Counting
@@ -483,46 +526,46 @@ W.map = 1440; W.hk = 0; W.advance(6); W.hk = 2; W.fire("PLAYER_PVP_KILLS_CHANGED
 check(LB.Mine() == 5, "counter reset (new day) handled")
 W.instance = true; W.hk = 3; W.advance(6); W.instance = false
 check(LB.Mine() == 5, "kill in an instance (Warsong) not counted")
-local nH = countSent("W")
+local nH = countSent("H")
 W.advance(31)
-check(countSent("W") == nH + 1 and lastSent("W").m == "W|1|" .. wk .. "|5", "one debounced W: " .. tostring(lastSent("W") and lastSent("W").m))
+check(countSent("H") == nH + 1 and lastSent("H").m == "H|1|" .. wk .. "|5", "one debounced H: " .. tostring(lastSent("H") and lastSent("H").m))
 W.hk = 4; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
 W.hk = 5; W.fire("PLAYER_PVP_KILLS_CHANGED"); W.advance(5)
-check(countSent("W") == nH + 1, "no second H within 30 s")
+check(countSent("H") == nH + 1, "no second H within 30 s")
 W.advance(25)
-check(countSent("W") == nH + 2 and lastSent("W").m == "W|1|" .. wk .. "|7", "then one W with the latest count")
+check(countSent("H") == nH + 2 and lastSent("H").m == "H|1|" .. wk .. "|7", "then one H with the latest count")
 -- Receiving H
-recv("W|1|" .. wk .. "|50", "Thalanor-Oakheart")
-recv("W|1|" .. wk .. "|40", "Thalanor-Oakheart")
-recv("W|1|" .. wk .. "|99", "Random-Stranger")
-recv("W|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
+recv("H|1|" .. wk .. "|50", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|40", "Thalanor-Oakheart")
+recv("H|1|" .. wk .. "|99", "Random-Stranger")
+recv("H|1|" .. (wk + 5) .. "|77", "Caelith-Shade")
 local rows = LB.Rows(wk)
 check(#rows == 2 and rows[1].name == "Thalanor Oakheart" and rows[1].c == 50 and rows[1].level == 60
     and rows[2].key == "sanalune silverwind", "H stored as max, stranger and far week ignored")
 -- Sync: Caelith (online, just heard) is lowest, so she answers attempt 1; I answer attempt 2
-recv("W|1|" .. wk .. "|5", "Caelith-Shade")
+recv("H|1|" .. wk .. "|5", "Caelith-Shade")
 check(LB.Repliers("thalanor oakheart")[1] == "caelith shade", "elected replier: lowest recent name")
-local nHS = countSent("WS")
-recv("WQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
+local nHS = countSent("HS")
+recv("HQ|1|" .. wk .. "|1", "Thalanor-Oakheart")
 W.advance(1)
-check(countSent("WS") == nHS, "not elected: no reply")
-recv("WQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
+check(countSent("HS") == nHS, "not elected: no reply")
+recv("HQ|1|" .. wk .. "|2", "Thalanor-Oakheart")
 W.advance(1)
-local hs = lastSent("WS")
+local hs = lastSent("HS")
 check(hs and hs.ch == "WHISPER" and hs.to == "Thalanor-Oakheart" and hs.m:find("Thalanor-Oakheart:50", 1, true)
     and hs.m:find("Sanalune-Silverwind:7", 1, true) and hs.m:find("Caelith-Shade:5", 1, true), "HS reply: " .. tostring(hs and hs.m))
-W.fire("CHAT_MSG_ADDON", "MWG1", "WS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
+W.fire("CHAT_MSG_ADDON", "MWG1", "HS|1|" .. wk .. "|Velanya-Dawnleaf:12,Sanalune-Silverwind:999,Random-Stranger:7,bad", "WHISPER", "Caelith-Shade")
 rows = LB.Rows(wk)
 check(#rows == 4 and LB.Mine() == 7, "HS merged; my own count not overwritten; stranger not shown")
 -- Chunks stay under 255 bytes and carry everyone
 local big = {}
 for i = 1, 40 do big["member" .. i .. " longsurname"] = { n = ("Member%d Longsurname"):format(i), c = i } end
-ns.db.weeks[wk - 1] = big
+ns.db.board[wk - 1] = big
 local chunks, total = LB.Chunks(wk - 1), 0
 local okLen = true
 for _, c in ipairs(chunks) do
     total = total + #c
-    if #table.concat({ "WS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
+    if #table.concat({ "HS", 1, wk - 1, table.concat(c, ",") }, "|") > 254 then okLen = false end
 end
 check(#chunks >= 4 and total == 40 and okLen, "chunks: " .. #chunks .. " messages, " .. total .. " entries")
 -- Any kill, not just honorable: PARTY_KILL, matched against the HK counter
@@ -543,14 +586,14 @@ check(LB.Mine() == base + 3, "NPCs and other zones not counted")
 W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
 check(LB.Mine() == base + 4, "HK alone still counts (party kill secret or missed)")
 W.advance(11)
-for k, e in pairs(ns.db.weeks[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
+for k, e in pairs(ns.db.board[wk]) do if k == ns.meKey then e.c = 5 end end   -- back to the numbers below
 -- Page
-ns.db.weeks[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
-ns.db.weeks[wk - 6] = { x = { n = "X", c = 1 } }
+ns.db.board[wk - 1] = { ["thalanor oakheart"] = { n = "Thalanor Oakheart", c = 241 } }
+ns.db.board[wk - 6] = { x = { n = "X", c = 1 } }
 ns.ToggleWindow(5)
 local pg = LB.page
 check(MoonwardensFrame.current == 5 and pg and pg:IsShown(), "leaderboard page opens")
-check(ns.db.weeks[wk - 6] == nil, "old weeks pruned")
+check(ns.db.board[wk - 6] == nil, "old weeks pruned")
 check(pg.rows[1].name:GetText() == "Thalanor Oakheart" and pg.rows[1].n:GetText() == 50
     and pg.rows[1].class:GetText() == "60 Warrior", "row 1")
 local mine
@@ -564,6 +607,82 @@ pg.tabs[1]._scripts.OnClick(pg.tabs[1])
 SlashCmdList.MOONWARDENS("hk")
 check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")
 ns.ToggleWindow()
+
+---------------------------------------------------------------------------
+-- 0.6.0-test's Sunday weeks carried back into Tuesday weeks; the kill log
+---------------------------------------------------------------------------
+do
+    local LBo = ns.Leaderboard
+    local cw = LBo.Week()
+    -- The Sunday week that starts 2 days before this Tuesday week
+    local sunWeek = math.floor((1704207600 + cw * 604800 - 2 * 86400 - 1704639600) / 604800 + 0.5)
+    check(1704639600 + sunWeek * 604800 + 2 * 86400 == 1704207600 + cw * 604800, "Sunday week id found")
+    local myBefore = LBo.Mine()
+    ns.db.weeks = { [sunWeek] = { ["sanalune silverwind"] = { n = "Sanalune Silverwind", c = myBefore + 90, cls = "DRUID" },
+                                  ["velanya dawnleaf"] = { n = "Velanya Dawnleaf", c = 3, cls = "PRIEST" } } }
+    LBo.CarryBack()
+    check(LBo.Mine() == myBefore + 90 and ns.db.board[cw]["velanya dawnleaf"].c >= 3, "Sunday counts carried back to this Tuesday week")
+    check(ns.db.weeks == nil, "carried back once")
+
+    -- Kill log: every kill, wherever it happened, with its time
+    local log = LBo.Log()
+    local n0 = #log
+    W.advance(11)
+    W.map, W.subzone = 1439, ""
+    W.hk = (W.hk or 0) + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    local e = log[#log]
+    check(#log == n0 + 1 and e.m == 1439 and e.z == "Darkshore" and e.s == "h" and not e.k and e.t == GetServerTime(),
+        "kill in Darkshore logged (not counted), with its time")
+    W.map = 1440
+    local mineNow = LBo.Mine()
+    W.advance(11)
+    LBo.PartyKill("Player-1-01", "Player-0-7062-ABCD")
+    W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    e = log[#log]
+    check(#log == n0 + 2 and e.s == "ph" and e.k == 1 and e.g == "Player-0-7062-ABCD" and LBo.Mine() == mineNow + 1,
+        "party kill + honour counter: one entry, both sources, counted once")
+    W.advance(11)
+    W.hk = W.hk + 1; W.fire("PLAYER_PVP_KILLS_CHANGED")
+    LBo.PartyKill("Player-1-02", "Player-0-7062-EF01")
+    e = log[#log]
+    check(#log == n0 + 3 and e.s == "ph" and e.g == "Player-0-7062-EF01", "twin the other way round fills in the victim")
+    W.advance(11)
+    check(ns.db.kills[ns.meKey] == log, "log saved per character")
+    SlashCmdList.MOONWARDENS("kills")
+    check(W.prints[#W.prints]:find("Ashenvale", 1, true) and table.concat(W.prints, "\n", #W.prints - 5):find("kills logged", 1, true), "/mw kills: " .. W.prints[#W.prints])
+end
+
+---------------------------------------------------------------------------
+-- Update reminder (V messages)
+---------------------------------------------------------------------------
+local Ver = ns.Comm.Version
+check(Ver.Newer("0.6.0", "0.6.0-test") and not Ver.Newer("0.6.0-test", "0.6.0"), "a release is newer than its test build")
+check(Ver.Newer("0.10.0", "0.9.9") and Ver.Newer("0.6.1-test", "0.6.0") and not Ver.Newer("0.6.0", "0.6.0"), "version order")
+check(countSent("V") >= 1 and lastSent("V").m == "V|1|" .. ns.VERSION, "my version said after login")
+local before = #W.prints
+recv("V|1|0.7.0", "Thalanor-Oakheart")
+check(#W.prints == before and Ver.Newest() == nil, "one non-officer saying 0.7.0 is not enough")
+recv("V|1|9.9.9-test", "Caelith-Shade"); recv("V|1|9.9.9-test", "Thalanor-Oakheart")
+check(Ver.Newest() == nil, "test builds never prompt an update")
+recv("V|1|0.7.0", "Caelith-Shade")
+check(Ver.Newest() == "0.7.0" and W.prints[#W.prints]:find("0.7.0 is out", 1, true), "two guildies: update reminder")
+recv("V|1|0.7.1", "Thalanor-Oakheart"); recv("V|1|0.7.1", "Caelith-Shade")
+check(#W.prints == before + 1 and Ver.Newest() == "0.7.1", "said once per session; tooltip follows the newest")
+local mt = { lines = {}, AddLine = function(self, l) self.lines[#self.lines + 1] = l end }
+ns.UI.MinimapTooltip(mt)
+check(table.concat(mt.lines, "\n"):find("Update available: 0.7.1", 1, true), "minimap tooltip shows the update")
+-- Someone behind me logs in: I answer once (unless someone else does)
+W.advance(301)
+local nV = countSent("V")
+recv("V|1|0.5.4", "Caelith-Shade")
+W.advance(31)
+check(countSent("V") == nV + 1, "answered a guildie on an old version")
+recv("V|1|0.5.4", "Thalanor-Oakheart"); W.advance(31)
+check(countSent("V") == nV + 1, "not again within 5 minutes")
+W.advance(301)
+recv("V|1|0.5.4", "Caelith-Shade"); W.advance(2)
+recv("V|1|" .. ns.VERSION, "Thalanor-Oakheart"); W.advance(31)
+check(countSent("V") == nV + 1, "someone else answered first: I stay quiet")
 
 check(not W.events["COMBAT_LOG_EVENT_UNFILTERED"], "combat log never registered (forbidden on 12.x)")
 
