@@ -280,8 +280,8 @@ for i = 1, gused do if gd[i].g.key == "thalanor oakheart" then hasT = true end e
 check(hasT and select(2, ns.MapMini.Debug()) == 1, "dots come back after leaving the group")
 W.unitPos = nil
 WorldMapFrame:Hide(); W.advance(0.1)
-SlashCmdList.MOONWARDENS("test")
-check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test")
+SlashCmdList.MOONWARDENS("test mapdots on")
+check(W.prints[#W.prints]:find("2 guildies placed", 1, true) and P.CountInMyZone() == 2, "/mw test mapdots on")
 
 ---------------------------------------------------------------------------
 -- Phase 3: layer detector

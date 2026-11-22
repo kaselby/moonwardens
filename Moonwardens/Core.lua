@@ -186,3 +186,23 @@ SlashCmdList.MOONWARDENS = function(msg)
     table.sort(verbs)
     for _, v in ipairs(verbs) do ns.print("  /mw " .. v .. " - " .. ns.slash[v].help) end
 end
+
+---------------------------------------------------------------------------
+-- /mw test: things to try out in game, each its own word ("/mw test
+-- badges on"). Modules add them with ns.tests[name] = { usage, help, fn };
+-- "/mw test" alone lists them.
+---------------------------------------------------------------------------
+ns.tests = {}
+ns.slash.test = { help = "things to try out in game (/mw test for the list)", fn = function(rest)
+    local name, arg = (rest or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    local t = ns.tests[name:lower()]
+    if t then return t.fn(arg) end
+    ns.print("things to test in game:")
+    local names = {}
+    for n in pairs(ns.tests) do names[#names + 1] = n end
+    table.sort(names)
+    for _, n in ipairs(names) do
+        local u = ns.tests[n].usage
+        ns.print(("  /mw test %s%s - %s"):format(n, (u and u ~= "") and (" " .. u) or "", ns.tests[n].help))
+    end
+end }

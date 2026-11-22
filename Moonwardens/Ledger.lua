@@ -31,7 +31,7 @@ ns.Ledger = Ledger
 Ledger.OPEN = false
 
 ---------------------------------------------------------------------------
--- Test mode (/mw test): the officer tools on my client, with nothing sent.
+-- Test mode (/mw test badges): the officer tools on my client, with nothing sent.
 -- Awards made in it go to db.ledgerTest, never to the guild; the Badges and
 -- Officers tabs show them (marked) alongside the real ones while it's on.
 -- Only for officers, the guild leader, and the testers named here.
@@ -524,7 +524,7 @@ local function newest()
     return t
 end
 
-ns.slash.test = { help = "test mode for badges: on, off, clear (officers and testers)", fn = function(rest)
+ns.tests.badges = { usage = "on | off | clear", help = "badge test mode: awards stay on this client (officers and testers)", fn = function(rest)
     local arg = (rest or ""):lower():match("%S+") or ""
     if not Ledger.TestAllowed() then
         ns.print("Test mode is for officers, the guild leader and named testers.")
@@ -532,7 +532,7 @@ ns.slash.test = { help = "test mode for badges: on, off, clear (officers and tes
     end
     if arg == "on" then
         ns.db.testMode = true
-        ns.print("|cffff8040Test mode on|r until you log out or reload. Awards you make stay on this client and are never sent. /mw test off to leave.")
+        ns.print("|cffff8040Test mode on|r until you log out or reload. Awards you make stay on this client and are never sent. /mw test badges off to leave.")
     elseif arg == "off" then
         ns.db.testMode = nil
         ns.print("Test mode off. Your test awards are hidden (kept until /mw test clear).")
@@ -544,7 +544,7 @@ ns.slash.test = { help = "test mode for badges: on, off, clear (officers and tes
     else
         local n = 0
         for _ in pairs(testStore()) do n = n + 1 end
-        ns.print(("Test mode is %s; %d test award%s kept. /mw test on | off | clear"):format(
+        ns.print(("Badge test mode is %s; %d test award%s kept. /mw test badges on | off | clear"):format(
             ns.db.testMode and "|cffff8040on|r" or "off", n, n == 1 and "" or "s"))
         return
     end

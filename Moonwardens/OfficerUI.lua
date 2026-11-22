@@ -408,7 +408,7 @@ end
 local function fillAward(f)
     local a = f.award
     if ns.Ledger.Testing() then
-        a.testing:SetText("|cffff8040TEST MODE|r - awards you make here stay on this client and are never sent to the guild. /mw test off to leave, /mw test clear to wipe them.")
+        a.testing:SetText("|cffff8040TEST MODE|r - awards you make here stay on this client and are never sent to the guild. /mw test badges off to leave, /mw test badges clear to wipe them.")
     else
         a.testing:SetText("Every award is logged with your name, in the Audit Log.")
     end

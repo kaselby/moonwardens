@@ -244,9 +244,9 @@ local function check()
     end
     if found or changed then dotsChanged() end
 end
--- /mw newdots: as on the first load with this version (the tab's dot);
+-- /mw test newdots: as on the first load with this version (the tab's dot);
 -- "all": every badge I have marked new as well, to see their dots.
-ns.slash.newdots = { help = "the new-badge dots again (all: on every badge you have, too)", fn = function(arg)
+ns.tests.newdots = { usage = "[all]", help = "the new-badge dots again (all: on every badge you have, too)", fn = function(arg)
     local db = ns.db
     if not db then return end
     db.badgeKnown, db.badgeNew, db.badgeTabNew = nil, {}, nil
@@ -1429,10 +1429,15 @@ local function newBoardCell(bd, size, countFont)
 end
 
 -- `it`: { b, e } (nil: an empty slot); `frac`: not earned yet, how far along.
--- (/mw fillpreview: every not-earned one drawn half full, to see the fill)
+-- (/mw test fill on: every not-earned one drawn half full, to see the fill)
 local fillPreview
-ns.slash.fillpreview = { help = "show every not-earned badge half filled on the Overview (again: off)", fn = function()
-    fillPreview = not fillPreview and 0.5 or nil
+ns.tests.fill = { usage = "on | off", help = "every not-earned badge drawn half filled on the Overview", fn = function(arg)
+    arg = (arg or ""):lower()
+    if arg ~= "on" and arg ~= "off" then
+        ns.print(("fill preview is %s. /mw test fill on | off"):format(fillPreview and "on" or "off"))
+        return
+    end
+    fillPreview = arg == "on" and 0.5 or nil
     ns.print(fillPreview and "Fill preview on: not-earned badges drawn half full." or "Fill preview off.")
     if BUI.Refresh then BUI.Refresh() end
 end }

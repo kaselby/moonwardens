@@ -442,9 +442,29 @@ ns.slash.where = { help = "where guildies with the addon are", fn = function()
     for z, c in pairs(zones) do ns.print(("  %s: %d"):format(z, c)) end
 end }
 
--- /mw test: three online guildies placed around me for 50 s (until they go
--- stale), so the dots, tooltip and panel can be checked alone.
-ns.slash.test = { help = "show three test dots near you for 50 s", fn = function()
+-- /mw test mapdots on: three online guildies placed around me (one in
+-- combat on my layer, one on another, one unknown), so the dots, tooltip and
+-- panel can be checked alone; kept there until /mw test mapdots off (or
+-- until they send a position of their own).
+local testDots, testTicker
+local function clearTestDots()
+    if testTicker then testTicker:Cancel(); testTicker = nil end
+    for key in pairs(testDots or {}) do guildies[key] = nil end
+    testDots = nil
+end
+ns.tests.mapdots = { usage = "on | off", help = "three test guildie dots around you on the maps", fn = function(arg)
+    arg = (arg or ""):lower()
+    if arg == "off" then
+        local had = testDots ~= nil
+        clearTestDots()
+        ns.print(had and "test dots off." or "no test dots to take away.")
+        return
+    end
+    if arg ~= "on" then
+        ns.print(("test dots are %s. /mw test mapdots on | off"):format(testDots and "on" or "off"))
+        return
+    end
+    clearTestDots()
     local map, x, y = Position.ReadMine()
     if not (map and x) then ns.print("can't read your position here.") return end
     local picks = {}
@@ -455,9 +475,17 @@ ns.slash.test = { help = "show three test dots near you for 50 s", fn = function
     local spots = { { 0.01, 0 }, { -0.008, 0.008 }, { 0, -0.012 } }
     local myL = me.layer and me.layer > 0 and me.layer or 1
     local layers = { myL, myL + 1, 0 }
+    testDots = {}
     for i, key in ipairs(picks) do
         guildies[key] = { key = key, map = map, x = x + spots[i][1], y = y + spots[i][2],
             layer = layers[i], flags = i == 1 and Position.FLAG_COMBAT or 0, at = ns.now() }
+        testDots[key] = guildies[key]
     end
-    ns.print(("test dots: %d guildies placed around you on the world map and minimap for 50 s."):format(#picks))
+    -- (kept fresh until turned off; one that sends a real position is theirs again)
+    testTicker = C_Timer.NewTicker(10, function()
+        for key, g in pairs(testDots or {}) do
+            if guildies[key] == g then g.at = ns.now() else testDots[key] = nil end
+        end
+    end)
+    ns.print(("test dots: %d guildies placed around you on the world map and minimap, until /mw test mapdots off."):format(#picks))
 end }
