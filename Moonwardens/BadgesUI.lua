@@ -1527,19 +1527,11 @@ local function newBoard(parent, opts)
             s:Show()
         end
         y = y - T - 12
+        -- (no badges at all: the Collection's heading and its control stay -
+        -- the Overview's View Only Acquired Badges must be there to untick -
+        -- and "no badges yet" goes where its icons would be)
         local any = filled + #rest + #locked > 0
-        self.none:SetShown(not any)
-        if not any then
-            self.none:ClearAllPoints()
-            self.none:SetPoint("TOP", self, "TOP", 0, y)
-            self.none:SetText(mine and "No badges yet. Defend Ashenvale to earn your first." or "No badges yet.")
-            self.restHead:Hide(); self.restHead.line:Hide(); self.grid:Hide()
-            if self.head then self.head:Hide() end
-            for _, c in ipairs(self.cells) do c:Hide() end
-            y = y - 24
-            self:SetHeight(-y)
-            return -y
-        end
+        self.none:Hide()
 
         -- The Collection: the rest, in rows, centred; then (all) the ones
         -- not earned yet.
@@ -1580,7 +1572,11 @@ local function newBoard(parent, opts)
         self.grid:SetSize(w, rows * pitch + 4)
         self.grid:Show()
         self.hint:SetShown(n == 0)
-        self.hint:SetText(mine and "Drag a badge here to take it out of your Showcase." or "Nothing more.")
+        if not any then
+            self.hint:SetText(mine and "No badges yet. Defend Ashenvale to earn your first." or "No badges yet.")
+        else
+            self.hint:SetText(mine and "Drag a badge here to take it out of your Showcase." or "Nothing more.")
+        end
         y = top - rows * pitch
         self:SetHeight(-y)
         return -y
