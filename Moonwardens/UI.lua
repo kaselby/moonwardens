@@ -148,31 +148,33 @@ function UI.Pct(n, total)
 end
 
 ---------------------------------------------------------------------------
--- GameTooltip's first line at another size: the tooltip text font at
--- `size`, until the tooltip is cleared or hides (then the game's again).
+-- A GameTooltip line at another size: the tooltip text font at `size`,
+-- until the tooltip is cleared or hides (then the game's again). Line 1,
+-- the title, by TooltipTitleSize.
 ---------------------------------------------------------------------------
-local titleFonts, titleSaved, titleHooked = {}, nil, false
-function UI.TooltipTitleSize(size)
-    local line = _G.GameTooltipTextLeft1
+local lineFonts, lineSaved, lineHooked = {}, {}, false
+function UI.TooltipLineSize(n, size)
+    local line = n and _G["GameTooltipTextLeft" .. n]
     if not (line and GameTooltipText and size) then return end
-    local f = titleFonts[size]
+    local f = lineFonts[size]
     if not f then
         local path, _, flags = GameTooltipText:GetFont()
         f = CreateFont("MoonwardensTooltipTitle" .. size)
         f:SetFont(path, size, flags or "")
-        titleFonts[size] = f
+        lineFonts[size] = f
     end
-    titleSaved = titleSaved or line:GetFontObject() or GameTooltipHeaderText
+    lineSaved[line] = lineSaved[line] or line:GetFontObject() or (n == 1 and GameTooltipHeaderText or GameTooltipText)
     line:SetFontObject(f)
-    if not titleHooked then
-        titleHooked = true
+    if not lineHooked then
+        lineHooked = true
         local function restore()
-            if titleSaved then line:SetFontObject(titleSaved); titleSaved = nil end
+            for l, obj in pairs(lineSaved) do l:SetFontObject(obj); lineSaved[l] = nil end
         end
         GameTooltip:HookScript("OnHide", restore)
         pcall(GameTooltip.HookScript, GameTooltip, "OnTooltipCleared", restore)
     end
 end
+function UI.TooltipTitleSize(size) UI.TooltipLineSize(1, size) end
 
 ---------------------------------------------------------------------------
 -- Settings page

@@ -388,6 +388,14 @@ end
 
 ns.onLogin(function()
     putBack(nil)                                      -- (left from a game that closed mid-showing)
+    -- (the old nameplate peek's settings, if a game closed mid-peek: back as they were)
+    local pb = ns.db and ns.db.peekBack
+    if type(pb) == "table" and not inCombat() then
+        for name, v in pairs(pb) do
+            if type(v) == "table" and tonumber(cvar(name)) == tonumber(v.ours) then cvar(name, v.old) end
+        end
+        ns.db.peekBack = nil
+    end
     ns:On("NAME_PLATE_UNIT_ADDED", function(unit) if not inBorderQuiet() then observeUnit(unit, "plate") end end)
     ns:On("UPDATE_MOUSEOVER_UNIT", function() observeUnit("mouseover", "mouse") end)
     ns:On("PLAYER_TARGET_CHANGED", function() observeUnit("target", "target") end)

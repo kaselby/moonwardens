@@ -38,6 +38,14 @@ Ledger.OPEN = false
 ---------------------------------------------------------------------------
 local TESTERS = { ["shandor moonfang"] = true }
 
+-- Named guildies with an officer's powers here, whatever their rank: the
+-- Officers tab, awarding and granting any badge, Approvals, revoking. Every
+-- client checks awards against this list too, so theirs count.
+Ledger.ADMINS = { ["shandor moonfang"] = true }
+local function isAdmin(key)
+    return key and (Ledger.ADMINS[key] or (ns.Roster and ns.Roster.IsOfficer(key))) and true or false
+end
+
 function Ledger.TestAllowed()
     local key = ns.meKey
     if not key then return false end
@@ -66,7 +74,7 @@ local seq = 0
 -- client on every award it hears, from the guild roster (server data).
 local function allowedFor(key, badgeId)
     if not key then return false end
-    if ns.Roster and ns.Roster.IsOfficer(key) then return true end
+    if isAdmin(key) then return true end
     local b = badgeId and ns.Badges.Get(badgeId)
     for _, name in ipairs(b and b.grantedBy and b.grantedBy.names or {}) do
         if name == key then return true end
@@ -82,7 +90,7 @@ function Ledger.CanAward(key, badgeId)
     if Ledger.OPEN then return true end
     if key == ns.meKey and Ledger.Testing() then return true end
     if badgeId then return allowedFor(key, badgeId) end
-    if ns.Roster and ns.Roster.IsOfficer(key) then return true end
+    if isAdmin(key) then return true end
     for _, b in ipairs(ns.Badges.LIST) do
         if allowedFor(key, b.id) then return true end
     end
@@ -100,8 +108,16 @@ local function clean(s, max)
     return s
 end
 
+-- Before the fresh start (Badges.FRESH_START)? Then it's gone: never kept,
+-- never taken from anyone, never sent on.
+local function stale(e) return (tonumber(e and e.at) or 0) < (ns.Badges.FRESH_START or 0) end
+
 local function prune()
     local l = store()
+    for id, e in pairs(l) do if stale(e) then l[id] = nil end end
+    if ns.db.ledgerTest then
+        for id, e in pairs(ns.db.ledgerTest) do if stale(e) then ns.db.ledgerTest[id] = nil end end
+    end
     local list = {}
     for id, e in pairs(l) do list[#list + 1] = e end
     if #list <= KEEP then return end
@@ -155,7 +171,7 @@ function Ledger.Award(who, badgeId, n, note, extra)
     local b = ns.Badges.Get(badgeId)
     if not b then return nil, "No such badge." end
     if not Ledger.CanAward(nil, badgeId) then return nil, ("Only %s can award this badge."):format(ns.Badges.Granters(b)) end
-    if b.kind == "parent" then return nil, "Grant one of its bounties instead." end
+    if b.kind == "parent" then return nil, "Grant one of its Hunt Targets instead." end
     if not (who and ns.Roster.Get(who)) then return nil, "Pick a guildie on the roster." end
     n = math.floor(tonumber(n) or 0)
     if n < -100000 or n > 100000 then return nil, "That's too many." end
@@ -334,6 +350,8 @@ function Ledger.CheckClaims()
     if not (LB and LB.Rows and LB.WeekStart) then return end
     local week = LB.Week() - 1
     if now() < LB.WeekStart(week + 1) + 86400 then return end
+    local fw = ns.Badges.FreshWeek and ns.Badges.FreshWeek()
+    if fw and week <= fw then return end                 -- (a board from before the fresh start, or of its week)
     ns.db.placementClaimed = ns.db.placementClaimed or {}
     if ns.db.placementClaimed[week] then return end
     local rows = LB.Rows(week)
@@ -461,6 +479,7 @@ local function decode(f)
         version = f[12], note = f[13], ref = f[14] ~= "" and f[14] or nil,
     }
     if type(e.id) ~= "string" or #e.id > 24 or not e.at then return nil end
+    if stale(e) then return nil end                  -- (from before the fresh start)
     if e.kind ~= "award" and e.kind ~= "claim" and e.kind ~= "revoke" and e.kind ~= "hunt"
         and e.kind ~= "request" and e.kind ~= "deny" then return nil end
     if e.kind == "deny" and not e.ref then return nil end
@@ -539,6 +558,7 @@ ns.onLogin(function()
     if ns.db then ns.db.testMode = nil end
     ns.Comm.handlers.BL = onBL
     ns.Comm.handlers.BLQ = onBLQ
+    if ns.Badges.FreshStartLocal then ns.Badges.FreshStartLocal() end   -- (before the claims: they start again)
     prune()
     ns.after(20, function()
         if IsInGuild() then ns.Comm.Send({ "BLQ", ns.Comm.PROTO, math.max(0, newest() - 60) }, "GUILD") end

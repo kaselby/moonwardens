@@ -101,9 +101,10 @@ end
 -- Our Layer cell for each of the game's roster rows (kept here, not on them).
 local cells = setmetatable({}, { __mode = "k" })
 
--- A guildie's most prestigious badges (Badges.Prestigious: most points,
--- then latest), the best tier of a track only, at most BADGE_N. Kept a
--- while; dropped when the Ledger or anyone's badges change.
+-- A guildie's Top Badges: their Badge Showcase, in its order, the empty
+-- slots left out (Badges.ShowcaseOf; never arranged, or not heard from:
+-- their most prestigious). Kept a while; dropped when the Ledger or their
+-- badges or Showcase change (and the rows redrawn then).
 local prestige = {}         -- key -> { at, list }
 local function prestigeOf(key)
     if not (key and ns.Badges and ns.Badges.Of) then return {} end
@@ -112,14 +113,9 @@ local function prestigeOf(key)
     local list = {}
     local ok, result = pcall(ns.Badges.Of, key)
     if ok and type(result) == "table" then
-        local seen = {}
-        for _, b in ipairs(ns.Badges.Prestigious(result) or {}) do
-            local t = b.track or b.id
-            if not seen[t] then
-                seen[t] = true
-                list[#list + 1] = { b = b, e = result.badges[b.id] }
-            end
-            if #list >= BADGE_N then break end
+        local okS, show = pcall(ns.Badges.ShowcaseOf, key, result)
+        for _, it in ipairs(okS and show or {}) do
+            if #list < BADGE_N then list[#list + 1] = it end
         end
     end
     prestige[key] = { at = ns.now(), list = list }
@@ -523,8 +519,11 @@ local function attach()
     ns.every(2, function() refreshRows(false) end, "roster layer")
     ns.listen("RP", function() refreshRows(true) end)
     -- (badges changed: work them out again)
-    ns.listen("LEDGER", function() prestige = {} end)
-    ns.listen("BADGES", function(key) if key then prestige[key] = nil else prestige = {} end end)
+    ns.listen("LEDGER", function() prestige = {}; refreshRows(false) end)
+    ns.listen("BADGES", function(key)
+        if key then prestige[key] = nil else prestige = {} end
+        refreshRows(false)                    -- (at once: a Showcase rearranged shows now)
+    end)
 end
 
 ns:On("ADDON_LOADED", function(name)

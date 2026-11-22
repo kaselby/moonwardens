@@ -1,5 +1,5 @@
 -- Menu: a "Moonwardens" section at the bottom of the game's right-click menu
--- for a guildie, with View Badges: their name in chat and in the guild
+-- for a guildie, with Inspect Badges: their name in chat and in the guild
 -- roster, and their unit frames - target, focus, party and raid.
 -- Menu.ModifyMenu appends to the game's own menu (its tag is MENU_UNIT_ and
 -- the menu's kind); nothing of the game's is rebuilt or moved.
@@ -55,7 +55,7 @@ local function addSection(owner, root, contextData)
     if not key then return end
     root:CreateDivider()
     root:CreateTitle("Moonwardens")
-    root:CreateButton("View Badges", function() ns.guard(ns.Badges.View, "view badges")(key) end)
+    root:CreateButton("Inspect Badges", function() ns.guard(ns.Badges.View, "view badges")(key) end)
     if ns.Ledger and ns.Ledger.CanAward() and ns.OfficerUI then
         root:CreateButton("Award Badge Progress", function() ns.guard(ns.OfficerUI.Open, "award")(key) end)
     end

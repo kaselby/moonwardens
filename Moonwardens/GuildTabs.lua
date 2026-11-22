@@ -42,25 +42,106 @@ function GT.GuildPicked()
     return ok2 and info and info.clubType == Enum.ClubType.Guild or false, info
 end
 
+-- The window's title on the guild: the tab's name - one of ours (its
+-- `title`), or the game's page under it (by its display mode); else the
+-- guild's name.
+local MODE_TITLES = { CHAT = "Guild Chat", ROSTER = "Moonwardens Roster", GUILD_INFO = "Guild Info" }
+local function titleFor(guild, info)
+    if not guild then return COMMUNITIES_FRAME_TITLE end
+    local p = current and ns.UI and ns.UI.pages[current]
+    if p and p.guild and p.guild.title then return p.guild.title end
+    local cf = CommunitiesFrame
+    local okM, mode = pcall(function() return cf.GetDisplayMode and cf:GetDisplayMode() end)
+    if okM and mode and COMMUNITIES_FRAME_DISPLAY_MODES then
+        for name, title in pairs(MODE_TITLES) do
+            if COMMUNITIES_FRAME_DISPLAY_MODES[name] == mode then return title end
+        end
+    end
+    return (info and info.name ~= "" and info.name) or "Moonwardens"
+end
+
+-- The game's View Log button (its Guild Info page's) under our pages: hidden
+-- while one of ours shows, back when its page does. (Kept here, not on it.)
+local logHooked = false
+local function viewLog(ours)
+    local b = CommunitiesFrame and CommunitiesFrame.GuildLogButton
+    if not b then return end
+    if not logHooked then
+        logHooked = true
+        b:HookScript("OnShow", function(self) if current and overlay and overlay:IsShown() then self:Hide() end end)
+    end
+    if ours then
+        b:Hide()
+    else
+        local cf = CommunitiesFrame
+        local okM, mode = pcall(function() return cf.GetDisplayMode and cf:GetDisplayMode() end)
+        if okM and COMMUNITIES_FRAME_DISPLAY_MODES and mode == COMMUNITIES_FRAME_DISPLAY_MODES.GUILD_INFO then b:Show() end
+    end
+end
+
+-- The guild's title, centred on the whole window. (The game's sits between
+-- its portrait and close button, off centre.) Ours is a font string of our
+-- own over the window's top, the game's own title left empty meanwhile;
+-- for other communities the game's comes back.
+local ourTitle
+local function showTitle(title)
+    local cf = CommunitiesFrame
+    local theirs = (cf.GetTitleText and cf:GetTitleText()) or (cf.TitleContainer and cf.TitleContainer.TitleText)
+    if not ourTitle then
+        local holder = CreateFrame("Frame", nil, cf)
+        holder:SetAllPoints(cf)
+        holder:SetFrameLevel((cf.TitleContainer and cf.TitleContainer:GetFrameLevel() or cf:GetFrameLevel()) + 5)
+        ourTitle = holder:CreateFontString(nil, "OVERLAY")
+        ourTitle:SetFontObject((theirs and theirs:GetFontObject()) or GameFontNormal)
+        if theirs then ourTitle:SetTextColor(theirs:GetTextColor()) end
+        ourTitle:SetWordWrap(false)
+    end
+    -- At the game's title's height, the window's middle.
+    ourTitle:ClearAllPoints()
+    local tx = theirs and theirs:GetCenter()
+    local cx = cf:GetCenter()
+    if tx and cx then ourTitle:SetPoint("CENTER", theirs, "CENTER", cx - tx, 0)
+    else ourTitle:SetPoint("TOP", cf, "TOP", 0, -6) end
+    ourTitle:SetText(title)
+    ourTitle:Show()
+end
+
 -- Size and title for what's picked: ours for the guild, the game's otherwise.
 local function guildLook(guild, info)
     local cf = CommunitiesFrame
     local w, h = cf:GetWidth(), cf:GetHeight()
     if guild and math.abs(w - 814) < 1 and math.abs(h - 426) < 1 then cf:SetSize(W, H)
     elseif not guild and math.abs(w - W) < 1 and math.abs(h - H) < 1 then cf:SetSize(814, 426) end
-    local title = guild and (info and info.name ~= "" and info.name or "Moonwardens") or COMMUNITIES_FRAME_TITLE
-    if title and cf.SetTitle and shownTitle ~= title then
-        shownTitle = title
-        pcall(cf.SetTitle, cf, title)
+    local title = titleFor(guild, info)
+    if not cf.SetTitle then return end
+    if guild then
+        if shownTitle ~= "" then shownTitle = ""; pcall(cf.SetTitle, cf, "") end
+        showTitle(title)
+    else
+        if ourTitle then ourTitle:Hide() end
+        if title and shownTitle ~= title then shownTitle = title; pcall(cf.SetTitle, cf, title) end
     end
 end
 
 -- First icon that exists on this client (SetTexture says false for a missing file).
+-- (an icon the game hasn't got is skipped for the next in the list: the
+-- game's file list says, where it has one - SetTexture takes any path)
+local function iconExists(path)
+    if type(GetFileIDFromPath) ~= "function" then return true end
+    local ok, id = pcall(GetFileIDFromPath, path)
+    return not ok or id ~= nil
+end
 local function setIcon(tex, names)
     for _, n in ipairs(names or {}) do
-        local ok, res = pcall(tex.SetTexture, tex, "Interface\\Icons\\" .. n)
-        if ok and res ~= false then return end
+        local path = "Interface\\Icons\\" .. n
+        if iconExists(path) then
+            local ok, res = pcall(tex.SetTexture, tex, path)
+            if ok and res ~= false then return end
+        end
     end
+    -- (none the game says it has: the first anyway, as before, else the "?")
+    local first = names and names[1]
+    if first and pcall(tex.SetTexture, tex, "Interface\\Icons\\" .. first) then return end
     tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
 end
 
@@ -89,9 +170,14 @@ local function uncheckGameTabs()
 end
 
 function GT.Deselect()
+    local was = current
     current = nil
     if overlay then overlay:Hide() end
     for _, t in ipairs(tabs) do t:SetChecked(false) end
+    if was and CommunitiesFrame then
+        viewLog(false)
+        guildLook(GT.GuildPicked())          -- (the title: the game's page again)
+    end
 end
 
 -- A tab of the game's was clicked: its page, not ours.
@@ -176,6 +262,7 @@ local function layout()
         pps:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -20)
     end
     if current then uncheckGameTabs() end
+    GT.UpdateDots()
     -- Back on the guild after another community: the page we were on.
     if not current and remembered and cf:IsShown() then
         local want = remembered
@@ -193,6 +280,10 @@ local function newTab(index, p)
     t.index = index
     t.tooltip = p.guild.tooltip or ("Moonwardens: " .. p.label)
     setIcon(t.Icon, p.guild.icon)
+    -- (something new on the page - its `dot` says: a blue dot, top right)
+    if p.guild.dot and ns.BadgesUI and ns.BadgesUI.New then
+        t.mwDot = ns.BadgesUI.New.Dot(t, 13, "TOPRIGHT", -6, -6, true)   -- (strong: a bigger glow, and a ping)
+    end
     t:SetScript("OnClick", ns.guard(function()
         PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
         GT.Select(index)
@@ -279,8 +370,6 @@ local function attach()
     if not okBg then bg:SetColorTexture(0.04, 0.04, 0.05, 0.97) end
     end
     overlay.DefaultBg()
-    local brand = UI.Text(overlay, "small", UI.GREY, "RIGHT"); brand:SetPoint("BOTTOMRIGHT", -10, 6)
-    brand:SetText("Moonwardens")
     overlay:Hide()
 
     for _, i in ipairs(order) do
@@ -296,6 +385,15 @@ local function attach()
         tabs[#tabs + 1] = t
     end
 
+    -- (the game titling its window itself: ours stays the one shown)
+    if cf.SetTitle then
+        hooksecurefunc(cf, "SetTitle", function(_, t)
+            if t ~= "" and ourTitle and ourTitle:IsShown() and GT.GuildPicked() then
+                shownTitle = ""
+                pcall(cf.SetTitle, cf, "")
+            end
+        end)
+    end
     if cf.UpdateCommunitiesTabs then hooksecurefunc(cf, "UpdateCommunitiesTabs", ns.guard(layout, "guild tabs")) end
     if cf.SetDisplayMode then hooksecurefunc(cf, "SetDisplayMode", ns.guard(layout, "guild tabs")) end
     GT.RosterRock()
@@ -414,6 +512,8 @@ function GT.Select(index)
         ns.guard(p.build, "build " .. p.label)(p.gframe)
     end
     current = index
+    if p.guild.onSelect then ns.guard(p.guild.onSelect, "tab picked")() end
+    GT.UpdateDots()
     for _, q in pairs(ns.UI.pages) do if q.gframe then q.gframe:SetShown(q == p) end end
     local art = p.guild.bgAtlas
     -- "rock": nothing over the window's rock (the backing above).
@@ -430,6 +530,8 @@ function GT.Select(index)
     overlay:Show()
     for _, t in ipairs(tabs) do t:SetChecked(t.index == index) end
     uncheckGameTabs()
+    viewLog(true)
+    guildLook(GT.GuildPicked())              -- (the title: this page's)
     local eb = CommunitiesFrame.ChatEditBox
     if eb and eb.HasFocus and eb:HasFocus() then eb:ClearFocus() end
     GT.Refresh()
@@ -472,6 +574,20 @@ ns.onLogin(function() if CommunitiesFrame then attach() end end, "guild tabs")
 
 -- For tests.
 function GT.Debug() return tabs, overlay, current end
+
+-- Our tabs' dots, as their pages' `dot` say now.
+function GT.UpdateDots()
+    for _, t in ipairs(tabs) do
+        local p = ns.UI.pages[t.index]
+        if t.mwDot then t.mwDot:SetShown(p and p.guild and p.guild.dot and p.guild.dot() and true or false) end
+    end
+end
+
+-- Is the page labelled `label` the one shown on the guild window now?
+function GT.Showing(label)
+    local p = current and ns.UI.pages[current]
+    return p and p.label == label and overlay and overlay:IsVisible() and true or false
+end
 
 -- Tabs again now (one's `visible` changed: test mode, rank).
 function GT.Relayout()

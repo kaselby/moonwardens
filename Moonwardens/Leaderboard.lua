@@ -270,10 +270,7 @@ local function build(f)
     local UI = ns.UI
     LB.page = f
     f.week = 0 -- 0 = this week, 1 = last week
-    f.title = UI.Text(f, "big", UI.GOLD, "LEFT"); f.title:SetPoint("TOPLEFT", 0, 0)
-    if ns.BadgesUI then ns.BadgesUI.Kit.bump(f.title) end
-    f.title:SetText("Horde Kills in Ashenvale Leaderboard")
-    f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -22)
+    f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -4)
 
     f.tabs = {}
     for i, label in ipairs({ "This week", "Last week" }) do
@@ -285,7 +282,7 @@ local function build(f)
         f.tabs[i] = b
     end
 
-    local y = -44
+    local y = -28
     local function col(text, x, w, justify)
         local h = UI.Text(f, nil, UI.GOLD, justify); h:SetPoint("TOPLEFT", x, y); h:SetWidth(w); h:SetText(text)
     end
@@ -350,6 +347,12 @@ local function build(f)
         f.scrollBar = sb
     end
     f.foot = UI.Text(f, "small", UI.GREY, "LEFT"); f.foot:SetPoint("BOTTOMLEFT", 0, 0); f.foot:SetWidth(508)
+
+    -- The empty column right of the board: coming soon.
+    f.soon = UI.Text(f, "big", UI.GREY, "CENTER")
+    f.soon:SetPoint("TOPLEFT", 548, y)
+    f.soon:SetPoint("BOTTOMRIGHT", 0, 20)
+    f.soon:SetText("Coming Soon")
 end
 
 -- The scroll bar follows the offset (wheel, week change, new rows).
@@ -427,12 +430,11 @@ local function refresh(f)
                 cr * 255, cg * 255, cb * 255, last.name, last.c)
         end
     end
-    if #rows > #f.rows then foot = foot .. " Scroll for more." end
     f.foot:SetText(foot)
 end
 
 ns.UI.AddPage(5, "Leaderboard", build, refresh,
-    { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard",
+    { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard", title = "Ashenvale Leaderboard",
       bgAtlas = "Legacy-Rewards-Tracker-background" })   -- (the minimap button's)
 
 ---------------------------------------------------------------------------

@@ -45,7 +45,8 @@ local SPANS_KEPT = 6
 local AWAY_EVERY = 10       -- off the war maps: look this often (s)
 local CAPTURE_FRONT = "ashenvale"   -- capture points count on this front only
 local ASHENVALE_OUTPOSTS = { ashenvale = true, lesi_bear_cave = true }   -- (Shobek'Aran, Lesi's Bear Cave)
--- ...and each on its own too (their lifetimes: Bankai!, War-Den).
+-- ...and each on its own too (Shobek'Aran's: Bankai!; the others feed no
+-- badge now, but are still counted, should one come back).
 local SITE_SERIES = { ashenvale = "shobekaran", lesi_bear_cave = "lesi_cave" }
 
 local spans = {}            -- "kind:id" -> { { from, to }, ... } server times I was inside, newest last
@@ -54,6 +55,14 @@ local nextAway = 0
 
 local function store()
     ns.db.objectiveCaptures = ns.db.objectiveCaptures or {}
+    -- (the fresh start, Badges.FRESH_START: what was taken before it, gone)
+    local fresh = ns.Badges and ns.Badges.FRESH_START
+    if fresh and ns.db.capturesFresh ~= fresh then
+        local kept = {}
+        for _, c in ipairs(ns.db.objectiveCaptures) do if (c.at or 0) >= fresh then kept[#kept + 1] = c end end
+        ns.db.objectiveCaptures = kept
+        ns.db.capturesFresh = fresh
+    end
     return ns.db.objectiveCaptures
 end
 

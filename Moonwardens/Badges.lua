@@ -12,35 +12,51 @@
 -- Another guildie's come by whisper when their badges are viewed:
 -- BQ|1                        "send me your weeks"
 -- BS|1|part|parts|w:c,w:c...  the weeks, in chunks under 255 bytes
+-- BV|1|part|parts|a,b,c,id... their Showcase and Collection's order (after
+--                             the weeks): the three slots (an id, or "-"
+--                             for an empty one), then the rest in order
+-- BW|1|a|b|c                  (to the guild) my Showcase changed: its slots,
+--                             so rosters show it at once; again at login
 -- (Officers keeping everyone's weeks, so a wiped client gets them back, is
 -- the next step.)
 local _, ns = ...
 local Badges = {}
 ns.Badges = Badges
 
+-- THE FRESH START: nothing from before this moment (server time, UTC)
+-- counts toward any badge - no Ledger event (awards, claims, hunts,
+-- requests, the whole Audit Log), no capture, no week of kills before its
+-- week. Its own week counts only the kills after each client first ran
+-- this version (a client first running it a later week: none of that
+-- week). Every client wipes its own copy once (Ledger.lua, Captures.lua,
+-- below). Move it later only to wipe again; never earlier.
+Badges.FRESH_START = 1795339200          -- 2026-11-22 09:20 UTC
+
+-- The week of the fresh start (the Leaderboard's), once it can be known.
+function Badges.FreshWeek()
+    local LB = ns.Leaderboard
+    return LB and LB.WeekOf and LB.WeekOf(Badges.FRESH_START) or nil
+end
+
 ---------------------------------------------------------------------------
 -- What there is
 ---------------------------------------------------------------------------
 -- The category tree, in order. A category with `children` is a header that
--- folds; `soon` ones show greyed with nothing in them yet.
+-- folds; one without is a page of its own; `soon` ones show greyed with
+-- nothing in them yet.
 Badges.CATEGORIES = {
-    { id = "overview", name = "Overview" },
-    { id = "ashenvale", name = "Ashenvale Defense", children = {
-        { id = "kills", name = "Kills" },
-        { id = "patrols", name = "Patrols", soon = true },   -- (switched off for now: not shown, not reported, not awarded)
-        { id = "objectives", name = "Objectives" },
-        { id = "leaderboard", name = "Leaderboard" },
-    } },
+    { id = "overview", name = "Badges Overview" },
+    -- Ashenvale's kills, objectives and Leaderboard places, one page.
+    { id = "ashenvale", name = "Ashenvale Defense" },
     -- Overlord's guild outposts and forts, anywhere (Captures.lua).
-    { id = "overlord", name = "Overlord", children = {
-        { id = "outposts", name = "Outposts" },
-        { id = "forts", name = "Forts" },
-    } },
-    { id = "wyldhunt", name = "The Wyld Hunt", children = {
-        { id = "training", name = "Huntress Training" },
-        { id = "ritual", name = "Ritual of the Hunt" },
-    } },
+    { id = "overlord", name = "Overlord" },
+    -- Huntress Training's monthly bounties, then the Ritual of the Hunt.
+    { id = "wyldhunt", name = "The Wyld Hunt" },
 }
+
+-- Categories switched off for now, in no list: their badges aren't shown,
+-- reported or awarded. (Patrols: no client can count them yet.)
+Badges.OFF = { patrols = true }
 
 -- Huntress Training bounties, month by month: a release item. Each month
 -- ships a new list ADDED at the end (never replace an old one: earned
@@ -82,7 +98,6 @@ Badges.TIER_ORDER = { copper = 1, silver = 2, gold = 3, moonstone = 4 }
 -- A Sentinel's moon glaive; the first of these this client has.
 -- Elune's boundless moonlight, for a lifetime of it.
 local LIFETIME_ICON = { "inv_ability_eluneschosendruid_boundlessmoonlight", "Spell_Nature_StarFall" }
-local WEEKLY_ICON = { "inv_glaive_1h_warfrontsnightelf_d_01", "Ability_DemonHunter_ThrowGlaive", "INV_Weapon_Glaive_01", "Ability_Hunter_MarkedForDeath" }
 
 -- (names are working names; they get settled before this ships)
 --
@@ -90,24 +105,19 @@ local WEEKLY_ICON = { "inv_glaive_1h_warfrontsnightelf_d_01", "Ability_DemonHunt
 -- Copper comes first, then Silver, then Gold - in this list (which sets the
 -- order of the cards) and in any list made from it. Keep new tiered
 -- badges in that order. Their ids never change with it.
+-- (Retired ids, never to be reused: wk1-4 Moonglaive Hunt, ow1-4 Reclaim
+-- Our Home, aw1-4 Uproot the Invaders, lc1-4 War-Den, uw1-4 Moon's
+-- Conquest, fw1-4 Glaives at the Gate, cv the first Cadre of Vengeance,
+-- fh Failed Hunt. What was earned of them no longer counts.)
 Badges.LIST = {
-    { id = "wk1", cat = "kills", kind = "weekly", tier = "copper", goal = 125, points = 5,
-      name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
-      desc = "Kill or assist in killing 125 Horde in Ashenvale in a week." },
-    { id = "wk2", cat = "kills", kind = "weekly", tier = "silver", goal = 250, points = 10,
-      name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
-      desc = "Kill or assist in killing 250 Horde in Ashenvale in a week." },
-    { id = "wk3", cat = "kills", kind = "weekly", tier = "gold", goal = 500, points = 25,
-      name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
-      desc = "Kill or assist in killing 500 Horde in Ashenvale in a week." },
-    { id = "lt1", cat = "kills", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
-      name = "Lifetime Wrath of the Kaldorei", icon = LIFETIME_ICON,
+    { id = "lt1", cat = "ashenvale", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
+      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
       desc = "Kill or assist in killing 10,000 Horde in Ashenvale." },
-    { id = "lt2", cat = "kills", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
-      name = "Lifetime Wrath of the Kaldorei", icon = LIFETIME_ICON,
+    { id = "lt2", cat = "ashenvale", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
+      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
       desc = "Kill or assist in killing 25,000 Horde in Ashenvale." },
-    { id = "lt3", cat = "kills", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
-      name = "Lifetime Wrath of the Kaldorei", icon = LIFETIME_ICON,
+    { id = "lt3", cat = "ashenvale", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
+      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
       desc = "Kill or assist in killing 50,000 Horde in Ashenvale." },
 }
 -- Patrols: no client can count these. Guildies report a patrol (the card's
@@ -134,18 +144,19 @@ end
 -- Objectives (Captures.lua, by `series`): Overlord's capture points, guild
 -- outposts and forts taken for our side while you were inside them -
 -- outposts worth a little more than capture points, forts a bit more
--- again - and Total Victory on the Ashenvale front with your raid. Weekly:
--- that many in one week, each tier once a week. Lifetime: all of them.
+-- again - and Total Victory on the Ashenvale front with your raid. Weekly
+-- (none now): that many in one week, each tier once a week. Lifetime: all
+-- of them.
 -- Counted by your own client and claimed as Kills badges are.
 -- PLACEHOLDER names and numbers.
--- (`what`: "X" names them "Weekly X" and "Lifetime X"; or their own
+-- (`what`: "X" names them "X (Weekly)" and "X"; or their own
 -- names, { weekly, lifetime }, either nil for the usual.
 -- `icon`: one list for both, or { weekly = list, lifetime = list }.
 -- `descW` / `descL`: own wording, given the count; else the usual)
 local function objectiveSet(cat, series, idW, idL, what, plural, icon, weekly, lifetime, descW, descL)
     local own = type(what) == "table" and what or {}
     local base = type(what) == "string" and what or ""
-    local nameW, nameL = own[1] or ("Weekly " .. base), own[2] or ("Lifetime " .. base)
+    local nameW, nameL = own[1] or (base .. " (Weekly)"), own[2] or base
     local iconW, iconL = icon.weekly or icon, icon.lifetime or icon
     for i, t in ipairs(weekly) do
         Badges.LIST[#Badges.LIST + 1] = {
@@ -163,34 +174,26 @@ local function objectiveSet(cat, series, idW, idL, what, plural, icon, weekly, l
     end
 end
 local function times(n) return n == 1 and "1 time" or (n .. " times") end
--- Total Victory: every one counts again ("selfcount"). First in Objectives.
+-- Total Victory: every one counts again ("selfcount").
 Badges.LIST[#Badges.LIST + 1] = {
-    id = "tv", cat = "objectives", kind = "selfcount", series = "victory", points = 50, goal = 1,
-    name = "Tor ilisar'thera'nal!", icon = { "Achievement_Zone_Ashenvale_01", "INV_BannerPVP_02" },
+    id = "tv", cat = "ashenvale", kind = "selfcount", series = "victory", points = 50, goal = 1,
+    name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
     desc = "Be in the party or raid that takes all of Ashenvale on Overlord.",
 }
--- Ashenvale Defense > Objectives: the Ashenvale front's capture points (no
--- other front's), and Ashenvale's two outposts, Shobek'Aran and Lesi's Bear
--- Cave (a copy of the outposts track, for those two only; a capture there
--- counts for both).
-local OUTPOST_WEEKLY = { { "copper", 1, 8 }, { "silver", 3, 15 }, { "gold", 5, 30 }, { "moonstone", 10, 60 } }
+-- Ashenvale Defense: the Ashenvale front's capture points (no other
+-- front's), and Shobek'Aran, one of Ashenvale's two outposts.
 local OUTPOST_LIFETIME = { { "copper", 10, 35 }, { "silver", 30, 75 }, { "gold", 75, 150 }, { "moonstone", 150, 300 } }
-objectiveSet("objectives", "captures", "ow", "ol", { "Reclaim Our Home (Weekly)", "The Forest Remembers" }, "Ashenvale capture points", { "INV_BannerPVP_02", "Achievement_BG_winWSG" },
-    { { "copper", 10, 5 }, { "silver", 20, 10 }, { "gold", 40, 20 }, { "moonstone", 80, 40 } },   -- (doubling)
+objectiveSet("ashenvale", "captures", "ow", "ol", { nil, "The Forest Remembers" }, "Ashenvale capture points",
+    { "spell_nature_protectionformnature", "Achievement_BG_winWSG" },
+    {},
     { { "copper", 100, 25 }, { "silver", 400, 50 }, { "gold", 1000, 100 }, { "moonstone", 2500, 250 } },
-    function(n) return ("Be inside %d Ashenvale capture points in one week."):format(n) end,
-    function(n) return ("Be inside %d Ashenvale capture points."):format(n) end)
--- (only two outposts, taken again and again: more of them a week than the
--- general outposts track asks, for the same points)
-objectiveSet("objectives", "ashenvale_outposts", "aw", "al", { "Uproot the Invaders (Weekly)" }, "Ashenvale outposts (Shobek'Aran, Lesi's Bear Cave)",
-    { "Achievement_Zone_Ashenvale_01", "Achievement_BG_captureflag_AB" },
-    { { "copper", 3, 5 }, { "silver", 6, 10 }, { "gold", 10, 25 }, { "moonstone", 20, 50 } }, {},   -- (points as the weekly kills)
-    function(n) return ("Capture Shobek'Aran or Lesi's Bear Cave %s in one week."):format(times(n)) end)
--- Their lifetimes, one each: Shobek'Aran's is "Bankai!", Lesi's "War-Den".
+    nil,
+    function(n) return ("Be inside %d Ashenvale capture points when they are captured."):format(n) end)
+-- Shobek'Aran's lifetime: "Bankai!".
 local function siteLifetime(series, idL, name, site, icon)
     for i, t in ipairs(OUTPOST_LIFETIME) do
         Badges.LIST[#Badges.LIST + 1] = {
-            id = idL .. i, cat = "objectives", kind = "selflifetime", series = series, tier = t[1], goal = t[2], points = t[3],
+            id = idL .. i, cat = "ashenvale", kind = "selflifetime", series = series, tier = t[1], goal = t[2], points = t[3],
             name = name, icon = icon, unit = site .. " captures",
             desc = ("Capture %s %s."):format(site, times(t[2])),
         }
@@ -198,25 +201,23 @@ local function siteLifetime(series, idL, name, site, icon)
 end
 siteLifetime("shobekaran", "bk", "Bankai!", "Shobek'Aran",
     { "inv_sword_1h_katana_b_03", "inv_sword_1h_pandariaquest_b_01", "inv_sword_1h_pvppandarias1_c_01", "INV_Sword_36", "INV_Sword_19", "Achievement_Zone_Ashenvale_01" })   -- (a katana)
-siteLifetime("lesi_cave", "lc", "War-Den", "Lesi's Bear Cave",
-    { "Ability_Druid_ChallangingRoar", "Ability_Racial_BearForm", "Achievement_Zone_Ashenvale_01" })
--- Overlord: guild outposts and forts on any map.
-objectiveSet("outposts", "outposts", "uw", "ul", "Outpost Capture", "guild outposts",
-    { weekly = { "Achievement_BG_captureflag_AB", "INV_BannerPVP_02" },
-      lifetime = { "spell_holy_elunesgrace", "Achievement_BG_captureflag_AB" } },
-    OUTPOST_WEEKLY, OUTPOST_LIFETIME)
-objectiveSet("forts", "forts", "fw", "fl", { "Weekly Fort Capture", "Ancient of War" }, "forts",
-    { weekly = { "Achievement_BG_DefendXbases_AB", "INV_Misc_Tournaments_banner_Nightelf" },
-      lifetime = { "inv_misc_tournaments_symbol_nightelf", "INV_Misc_Tournaments_banner_Nightelf" } },
-    { { "copper", 1, 10 }, { "silver", 2, 20 }, { "gold", 3, 40 }, { "moonstone", 6, 80 } },
-    { { "copper", 5, 50 }, { "silver", 15, 100 }, { "gold", 40, 200 }, { "moonstone", 80, 400 } })
+-- Overlord: guild outposts and forts on any map. (Their counts: about
+-- double the first ones at the low tiers, a third more at the high.)
+objectiveSet("overlord", "outposts", "uw", "ul", { nil, "Elune's Reach" }, "guild outposts",
+    { "spell_holy_elunesgrace", "Spell_Nature_StarFall" },
+    {},
+    { { "copper", 20, 35 }, { "silver", 60, 75 }, { "gold", 100, 150 }, { "moonstone", 195, 300 } })
+objectiveSet("overlord", "forts", "fw", "fl", { nil, "Ancient of War" }, "forts",
+    { "inv_misc_tournaments_symbol_nightelf", "INV_Misc_Tournaments_banner_Nightelf" },
+    {},
+    { { "copper", 10, 50 }, { "silver", 30, 100 }, { "gold", 55, 200 }, { "moonstone", 105, 400 } })
 -- Leaderboard ("placement"): 1st, 2nd or 3rd on a week's final Horde kills
 -- board (ties share the place). Each guildie's client claims its own, a day
 -- after the reset, once late counts are in.
 -- (Copper first, as everywhere; the id is the place: lb1 = 1st = Gold)
 for _, t in ipairs({ { "copper", 3, 10 }, { "silver", 2, 15 }, { "gold", 1, 25 } }) do
     Badges.LIST[#Badges.LIST + 1] = {
-        id = "lb" .. t[2], cat = "leaderboard", kind = "placement", tier = t[1], place = t[2], points = t[3], goal = 1,
+        id = "lb" .. t[2], cat = "ashenvale", kind = "placement", tier = t[1], place = t[2], points = t[3], goal = 1,
         name = "Chosen of Elune (Weekly)", icon = { "spell_nature_moonglow" },
         desc = ("Place %s on the weekly Horde kills leaderboard."):format(({ "first", "second", "third" })[t[2]]),
     }
@@ -225,26 +226,22 @@ end
 -- `grantedBy` names, officers always; `stack`: each grant counts again) and
 -- "rank" (comes with holding a guild rank).
 local SUELEVIN = { names = { "suelevin stormsong" } }
-for _, b in ipairs({
-    { id = "hp", cat = "ritual", kind = "granted", stack = true, points = 10,
-      name = "Hunting Party", icon = { "Ability_Tracking", "Ability_Hunter_BeastCall" },
+-- (listed after the bounties, below)
+-- `noInfo`: the card shows no line under its description (no "Granted
+-- by...", no rank request text, no progress bar). We don't need that
+-- additional detail on these: the description says it all.
+local RITUAL = {
+    -- (id "hp": it was Hunting Party; what was earned of it carries over)
+    { id = "hp", cat = "wyldhunt", kind = "granted", stack = true, points = 10, noInfo = true,
+      name = "Cadre of Vengeance", icon = { "Ability_Tracking", "Ability_Hunter_BeastCall" },
       desc = "Aid another Moonwarden in their Wyld Hunt." },
-    { id = "cv", cat = "ritual", kind = "granted", stack = true, points = 10,
-      name = "Cadre of Vengeance", icon = { "Ability_Hunter_RunningShot", "Ability_Rogue_Sprint" },
-      desc = "Complete a Wyld Hunt without dying." },
     -- Not automatic: officers are promoted through Huntress, so holding the
     -- rank (or one above) only files a request (autoRequest); an officer
     -- approves it in Approvals before it counts.
-    { id = "hr", cat = "ritual", kind = "granted", rank = "Huntress", autoRequest = "rank", points = 100,
+    { id = "hr", cat = "wyldhunt", kind = "granted", rank = "Huntress", autoRequest = "rank", points = 100, noInfo = true,
       name = "Huntress", icon = { "achievement_boss_councilsentinel", "Ability_Mount_WhiteTiger" },
       desc = "Earn the rank of Huntress." },
-    { id = "fh", cat = "ritual", kind = "granted", stack = true, points = 0,
-      name = "Failed Hunt", icon = { "INV_Misc_Bone_HumanSkull_01", "Ability_Rogue_FeignDeath" },
-      desc = "Fail a Wyld Hunt." },
-}) do
-    b.goal = 1
-    Badges.LIST[#Badges.LIST + 1] = b
-end
+}
 ---------------------------------------------------------------------------
 -- COMPOUND BADGES - THE TEMPLATE FOR EVERY BADGE MADE OF OTHER BADGES
 ---------------------------------------------------------------------------
@@ -265,7 +262,7 @@ end
 --     pile up as months go by. (Recent and Most Prestigious still list it;
 --     clicking it there opens the parent's card.)
 --   * The parent's card folds its children away with a click (Legacy's
---     +/-); each parent remembers its fold. A child's row shows its icon,
+--     +/-); folded at first, each parent remembers being opened. A child's row shows its icon,
 --     label, points (on a small shield) and a check once earned.
 --   * `active`: while true the parent is never greyed out (it's there to be
 --     done). Afterwards it's grey only if none of its children was earned.
@@ -274,15 +271,15 @@ end
 --
 -- Badges.Compound{
 --     id = "bh:2026-11",                      -- unique, never reused
---     cat = "training",                       -- the category it's listed in
---     name = "Bounty Hunter: November 2026",
+--     cat = "wyldhunt",                       -- the category it's listed in
+--     name = "Huntress Training: Nov, 2026",
 --     desc = "Complete any ... from November 2026.\nNo one in ...",
 --     icon = { "Ability_Hunter_MarkedForDeath" },   -- first the client has
---     listLabel = "This month's bounties",    -- heading over the children
+--     listLabel = "Includes",                 -- heading over the children (nil: none)
 --     active = true,                          -- see above
 --     children = {                            -- each a full badge (kind, points, ...)
 --         { id = "bh:2026-11:1", kind = "granted", points = 50,
---           name = "Bounty: Blackmoss the Fetid",   -- its own title, tooltips, log
+--           name = "Hunt Target: Blackmoss the Fetid",   -- its own title, tooltips, log
 --           label = "|cffffd100Lv 13|r  Blackmoss the Fetid",   -- its row in the card
 --           desc = "...", icon = { ... } },
 --     },
@@ -312,6 +309,12 @@ end
 -- first, and a child for each bounty (50 points, granted once by officers
 -- or Suelevin). Child ids: "bh:2026-11:3".
 local BOUNTY_ICON = { "Ability_Hunter_MarkedForDeath", "Ability_Hunter_SniperShot" }
+-- "2026-11" -> "Nov, 2026"
+local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+local function shortMonth(month)
+    local y, mo = month:match("^(%d+)-(%d+)$")
+    return (y and MONTHS[tonumber(mo)]) and (MONTHS[tonumber(mo)] .. ", " .. y) or month
+end
 for mi = #Badges.BOUNTIES, 1, -1 do
     local m = Badges.BOUNTIES[mi]
     local pid = "bh:" .. m.month
@@ -322,19 +325,26 @@ for mi = #Badges.BOUNTIES, 1, -1 do
         children[#children + 1] = {
             id = pid .. ":" .. i, kind = "granted", points = 50, grantedBy = SUELEVIN,
             month = m.month, index = i, level = t.level, target = t,
-            name = "Bounty: " .. t.name, label = ("|cffffd100Lv %d|r  %s"):format(t.level, t.name), icon = icon,
+            name = "Hunt Target: " .. t.name, label = ("|cffffd100Lv %d|r  %s"):format(t.level, t.name), icon = icon,
             desc = ("Complete the level %d Huntress Training bounty: %s."):format(t.level, t.more or t.name),
         }
     end
     Badges.Compound({
-        id = pid, cat = "training", icon = BOUNTY_ICON,
-        name = "Bounty Hunter: " .. m.label,
+        id = pid, cat = "wyldhunt", icon = BOUNTY_ICON,
+        name = "Huntress Training: " .. shortMonth(m.month),
         desc = ("Complete any Huntress Training bounty from %s.\nNo one in your party may be above the bounty's level."):format(m.label),
-        listLabel = mi == #Badges.BOUNTIES and "This month's bounties" or "Bounties",
+        -- (noInfo: no "Bounties: x / y" bar - we don't need that additional
+        -- detail on these; the rows and their checks show it)
         active = mi == #Badges.BOUNTIES,
-        extra = { month = m.month },
+        extra = { month = m.month, noInfo = true },
         children = children,
     })
+end
+
+-- The Ritual of the Hunt, after the bounties.
+for _, b in ipairs(RITUAL) do
+    b.goal = 1
+    Badges.LIST[#Badges.LIST + 1] = b
 end
 
 -- This month's child badge for bounty `index` (Hunt.lua).
@@ -349,12 +359,9 @@ function Badges.Resolve(e)
     return e.badge
 end
 
--- Moonstone for the kills (past Gold: 1,000 in one week; 100,000 in all).
-Badges.LIST[#Badges.LIST + 1] = { id = "wk4", cat = "kills", kind = "weekly", tier = "moonstone", goal = 1000, points = 50,
-    name = "Weekly Moonblade Hunt", icon = WEEKLY_ICON,
-    desc = "Kill or assist in killing 1,000 Horde in Ashenvale in a week." }
-Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kills", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
-    name = "Lifetime Wrath of the Kaldorei", icon = LIFETIME_ICON,
+-- Moonstone for the kills (past Gold: 100,000 in all).
+Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "ashenvale", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
+    name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
     desc = "Kill or assist in killing 100,000 Horde in Ashenvale." }
 
 ---------------------------------------------------------------------------
@@ -413,6 +420,7 @@ local soonCats
 function Badges.CategorySoon(cat)
     if not soonCats then
         soonCats = {}
+        for id in pairs(Badges.OFF) do soonCats[id] = true end
         for _, top in ipairs(Badges.CATEGORIES) do
             if top.soon then soonCats[top.id] = true end
             for _, c in ipairs(top.children or {}) do if c.soon then soonCats[c.id] = true end end
@@ -421,11 +429,29 @@ function Badges.CategorySoon(cat)
     return soonCats[cat] or false
 end
 
+-- The pages: categories with no children (the Overview too), and those
+-- folded under a header. { id, name, top } in order; `top` is the header's
+-- name, if any.
+function Badges.Pages()
+    local out = {}
+    for _, top in ipairs(Badges.CATEGORIES) do
+        if top.children then
+            for _, c in ipairs(top.children) do out[#out + 1] = { id = c.id, name = c.name, top = top.name, soon = c.soon } end
+        else
+            out[#out + 1] = { id = top.id, name = top.name, soon = top.soon }
+        end
+    end
+    return out
+end
+function Badges.IsPage(cat)
+    for _, p in ipairs(Badges.Pages()) do if p.id == cat then return true end end
+    return false
+end
+
 -- What a manual badge's progress is counted in: its counter, shared by its
 -- tiers (patrols), or the badge itself.
 function Badges.CounterOf(b) return b and (b.counter or b.id) end
 
--- "Weekly Moonblade Hunt: Copper"; untiered ones just their name.
 -- A badge's title: its name. The tier is never in it: it's the coin, in the
 -- corner of the badge's icon wherever the icon shows, and in front of the
 -- name (Badges.Coin) wherever only text does - dropdowns, tooltips, prompts.
@@ -688,6 +714,212 @@ function Badges.CategoryCount(result, cat)
     return have, all
 end
 
+---------------------------------------------------------------------------
+-- The Showcase and the Collection
+---------------------------------------------------------------------------
+-- A guildie's earned badges, as icons in two parts: the Showcase (three
+-- slots, each a badge or empty, picked and placed by them) and the
+-- Collection (all the rest, in their order). Mine are arranged by dragging
+-- (BadgesUI.lua's board) and kept in MoonwardensDB.badgeLayout =
+-- { showcase = { id or false, x3 }, order = { id... } }; another guildie's
+-- come by whisper (BV) with their weeks, and their Showcase to the guild
+-- whenever it changes (BW). Never arranged: the Showcase is the three most
+-- prestigious (a track's best tier only), the Collection by points. Badges
+-- earned since the last arranging go first in the Collection, to be seen.
+Badges.SHOWCASE_N = 3
+local layouts = {}         -- key -> { showcase, order }, another guildie's
+
+-- A badge's points (a parent's: its children's).
+function Badges.PointsOf(b)
+    if b.kind ~= "parent" then return b.points or 0 end
+    local n = 0
+    for _, cid in ipairs(b.children or {}) do local c = byId[cid]; n = n + (c and c.points or 0) end
+    return n
+end
+
+-- When it was last earned: the time, else its week's start, else 0.
+local function earnedAt(e)
+    if e.lastAt then return e.lastAt end
+    local LB = ns.Leaderboard
+    return (e.last and LB and LB.WeekStart and LB.WeekStart(e.last)) or 0
+end
+
+-- The orders the Collection can be shown in (the Badge Chest's dropdown).
+Badges.SORTS = {
+    { id = "arranged", text = "As arranged" },
+    { id = "pointsDesc", text = "Points: high to low" },
+    { id = "pointsAsc", text = "Points: low to high" },
+    { id = "newest", text = "Date earned: newest first" },
+    { id = "oldest", text = "Date earned: oldest first" },
+}
+
+local function sortBy(s)
+    return function(x, y)
+        if s == "pointsDesc" and x.pts ~= y.pts then return x.pts > y.pts end
+        if s == "pointsAsc" and x.pts ~= y.pts then return x.pts < y.pts end
+        if s == "newest" and x.at ~= y.at then return x.at > y.at end
+        if s == "oldest" and x.at ~= y.at then return x.at < y.at end
+        -- (ties: the higher points, then the name, then the tier)
+        if x.pts ~= y.pts then return x.pts > y.pts end
+        local tx, ty = Badges.Title(x.b), Badges.Title(y.b)
+        if tx ~= ty then return tx < ty end
+        return (Badges.TIER_ORDER[x.b.tier] or 0) < (Badges.TIER_ORDER[y.b.tier] or 0)
+    end
+end
+
+-- Like badges together: a tier track's tiers side by side (Copper first,
+-- as everywhere), the track placed where its first tier falls in `cmp`'s
+-- order (sorted by points high to low, where its best one is; arranged,
+-- where its first-placed one is).
+local function groupOf(b) return b.track or b.id end
+local function grouped(list, cmp)
+    table.sort(list, cmp)
+    local lead = {}
+    for i, it in ipairs(list) do
+        local g = groupOf(it.b)
+        if not lead[g] then lead[g] = i end
+    end
+    table.sort(list, function(x, y)
+        local gx, gy = groupOf(x.b), groupOf(y.b)
+        if gx ~= gy then return lead[gx] < lead[gy] end
+        return (Badges.TIER_ORDER[x.b.tier] or 0) < (Badges.TIER_ORDER[y.b.tier] or 0)
+    end)
+    return list
+end
+Badges.Grouped = grouped
+
+-- My Collection's order with `id`'s track gathered where `id` is (a tier
+-- dragged: its tiers go with it). A list of ids.
+function Badges.Regroup(order, id)
+    local b = byId[id]
+    local t = b and b.track
+    if not t then return order end
+    local out, members, at = {}, {}, nil
+    for _, x in ipairs(order) do
+        local xb = byId[x]
+        if x == id then at = #out + 1 end
+        if xb and xb.track == t then members[#members + 1] = x else out[#out + 1] = x end
+    end
+    if not at then return order end
+    table.sort(members, function(p, q) return (Badges.TIER_ORDER[byId[p].tier] or 0) < (Badges.TIER_ORDER[byId[q].tier] or 0) end)
+    for k, m in ipairs(members) do table.insert(out, at + k - 1, m) end
+    return out
+end
+
+function Badges.LayoutOf(key)
+    if key == ns.meKey then return ns.db and ns.db.badgeLayout end
+    return layouts[key]
+end
+
+-- Their Showcase and Collection: the Showcase's slots [1..3] (each
+-- { b, e, pts, at } or nil: empty), the Collection a list of them, and how
+-- many slots are filled. `sort`: a Badges.SORTS id for the Collection (nil:
+-- "arranged").
+function Badges.Arrange(key, result, sort)
+    local items, byBadge = {}, {}
+    for _, b in ipairs(Badges.LIST) do
+        local e = result.badges[b.id]
+        if e and e.times > 0 then
+            local it = { b = b, e = e, pts = Badges.PointsOf(b), at = earnedAt(e) }
+            items[#items + 1] = it
+            byBadge[b.id] = it
+        end
+    end
+    local lay = Badges.LayoutOf(key)
+    local ids = lay and lay.showcase
+    if not ids then
+        -- (the most prestigious, a track's best tier only)
+        ids = {}
+        local seen = {}
+        for _, b in ipairs(Badges.Prestigious(result)) do
+            local t = b.track or b.id
+            if not seen[t] and #ids < Badges.SHOWCASE_N then seen[t] = true; ids[#ids + 1] = b.id end
+        end
+    end
+    local show, shown, filled = {}, {}, 0
+    for i = 1, Badges.SHOWCASE_N do
+        local id = ids[i]
+        local it = id and byBadge[id]
+        if it and not shown[id] then show[i] = it; shown[id] = true; filled = filled + 1 end
+    end
+    local rest = {}
+    for _, it in ipairs(items) do if not shown[it.b.id] then rest[#rest + 1] = it end end
+    sort = sort or "arranged"
+    local pos
+    if sort == "arranged" and lay and lay.order then
+        pos = {}
+        for i, id in ipairs(lay.order) do pos[id] = pos[id] or i end
+    end
+    local by = sortBy(sort == "arranged" and "pointsDesc" or sort)
+    grouped(rest, function(x, y)
+        if pos then
+            local a, c = pos[x.b.id], pos[y.b.id]
+            if a and c then return a < c end
+            if a ~= c then return a == nil end          -- (new ones, not yet arranged, first)
+        end
+        return by(x, y)
+    end)
+    return show, rest, filled
+end
+
+-- Every badge they haven't earned, that can still be: closest to done
+-- first (then the list's order). Nothing switched off, and no past month's
+-- bounties. { b, e, frac } each; frac is how far along (0 to 1).
+function Badges.Unearned(result)
+    local list = {}
+    for i, b in ipairs(Badges.LIST) do
+        local e = result.badges[b.id]
+        local past = b.month and Badges.BOUNTY and b.month ~= Badges.BOUNTY.month
+        if e and e.times == 0 and not past and not Badges.CategorySoon(b.cat) and Badges.IsPage(b.cat) then
+            local g = e.goal or b.goal or 1
+            local v = math.max(0, math.min(e.value or 0, g))
+            list[#list + 1] = { b = b, e = e, frac = g > 0 and v / g or 0, i = i }
+        end
+    end
+    grouped(list, function(x, y)
+        if x.frac ~= y.frac then return x.frac > y.frac end   -- (a track where its closest tier is)
+        return x.i < y.i
+    end)
+    return list
+end
+
+-- Their Showcase's badges in order, the empty slots left out (the
+-- roster's Top Badges): a list of { b, e }.
+function Badges.ShowcaseOf(key, result)
+    local show = Badges.Arrange(key, result, "arranged")
+    local list = {}
+    for i = 1, Badges.SHOWCASE_N do
+        if show[i] then list[#list + 1] = { b = show[i].b, e = show[i].e } end
+    end
+    return list
+end
+
+-- My Showcase's slots, to the guild ("-": empty), a moment after the last
+-- change (a few drags in a row: one message).
+local tellToken = 0
+local function tellShowcase()
+    tellToken = tellToken + 1
+    local mine = tellToken
+    ns.after(2, function()
+        if mine ~= tellToken or not IsInGuild() then return end
+        local show = Badges.Arrange(ns.meKey, Badges.Mine(), "arranged")
+        local f = { "BW", ns.Comm.PROTO }
+        for i = 1, Badges.SHOWCASE_N do f[#f + 1] = show[i] and show[i].b.id or "-" end
+        ns.Comm.Send(f, "GUILD", nil, "showcase")
+    end, "showcase")
+end
+
+-- Mine, arranged: the Showcase's slots (an id or false each), then the
+-- Collection's ids in order.
+function Badges.SetLayout(showcase, order)
+    if not ns.db then return end
+    local slots = {}
+    for i = 1, Badges.SHOWCASE_N do slots[i] = showcase[i] or false end
+    ns.db.badgeLayout = { showcase = slots, order = order }
+    ns.fire("BADGES", ns.meKey)
+    tellShowcase()
+end
+
 -- The date a week began, as the game shows dates.
 function Badges.WeekDate(week)
     local t = ns.Leaderboard and ns.Leaderboard.WeekStart and ns.Leaderboard.WeekStart(week)
@@ -708,10 +940,40 @@ local function record()
     end
 end
 
+-- (the fresh start: weeks before its week dropped; its week, the kills
+-- since this client first ran it - badgeFreshBase is what it had then)
 function Badges.MyWeeks()
     record()
-    return ns.db and ns.db.badgeWeeks or {}
+    local raw = ns.db and ns.db.badgeWeeks or {}
+    local fw = Badges.FreshWeek()
+    if not fw then return raw end
+    local base = ns.db and ns.db.badgeFreshBase
+    local out = {}
+    for w, c in pairs(raw) do
+        if type(w) == "number" then
+            if w > fw then out[w] = c
+            elseif w == fw and base then out[w] = math.max(0, c - base) end
+        end
+    end
+    return out
 end
+
+-- Once per fresh start, on this client: its own copy wiped (here: the
+-- weeks of kills, and what was claimed of them).
+local function freshStart()
+    local db = ns.db
+    if not db or db.freshStart == Badges.FRESH_START then return end
+    local fw = Badges.FreshWeek()
+    if not fw then return end
+    record()
+    local LB = ns.Leaderboard
+    local cur = LB.Week()
+    -- (its week: what's counted so far is from before; a later week: none of it)
+    db.badgeFreshBase = (cur == fw) and math.max((db.badgeWeeks or {})[fw] or 0, LB.Mine(fw) or 0) or nil
+    db.badgeClaimed, db.rankRequested, db.placementClaimed = {}, {}, {}
+    db.freshStart = Badges.FRESH_START
+end
+Badges.FreshStartLocal = freshStart
 
 local function manualFor(key)
     return ns.Ledger and ns.Ledger.ManualFor(key) or nil
@@ -732,11 +994,14 @@ local ASK_GAP, ANSWER_GAP = 10, 10
 function Badges.WeeksOf(key)
     if key == ns.meKey then return Badges.MyWeeks() end
     local weeks = {}
+    -- (the fresh start: nothing before its week; the board's counts of its
+    -- week aren't theirs to trust - they started before it - only theirs)
+    local fw = Badges.FreshWeek() or -1
     local o = others[key]
-    if o then for w, c in pairs(o.weeks) do weeks[w] = c end end
+    if o then for w, c in pairs(o.weeks) do if w >= fw then weeks[w] = c end end end
     local board = ns.db and ns.db.board or {}
     for w, t in pairs(board) do
-        local e = type(t) == "table" and t[key]
+        local e = type(w) == "number" and w > fw and type(t) == "table" and t[key]
         if e and e.c and e.c > (weeks[w] or 0) then weeks[w] = e.c end
     end
     return weeks
@@ -758,6 +1023,21 @@ function Badges.Request(key)
     ns.Comm.Send({ "BQ", ns.Comm.PROTO }, "WHISPER", to)
 end
 
+-- `items` as "kind|1|part|parts|a,b,c" messages, each under 255 bytes
+-- ("BS|1|nn|nn|" is at most 12).
+local function sendChunks(kind, items, to)
+    local chunks, cur = {}, {}
+    local len = 0
+    for _, it in ipairs(items) do
+        if len + #it + 1 > 230 then chunks[#chunks + 1] = table.concat(cur, ","); cur, len = {}, 0 end
+        cur[#cur + 1] = it; len = len + #it + 1
+    end
+    chunks[#chunks + 1] = table.concat(cur, ",")
+    for i, s in ipairs(chunks) do
+        ns.Comm.Send({ kind, ns.Comm.PROTO, i, #chunks, s }, "WHISPER", to)
+    end
+end
+
 local function answer(sender, key)
     local now = ns.now()
     if answered[key] and now - answered[key] < ANSWER_GAP then return end
@@ -769,17 +1049,49 @@ local function answer(sender, key)
         if type(w) == "number" and type(c) == "number" and c > 0 then items[#items + 1] = w .. ":" .. math.floor(c) end
     end
     table.sort(items)
-    -- Chunks under 255 bytes ("BS|1|nn|nn|" is at most 12).
-    local chunks, cur = {}, {}
-    local len = 0
-    for _, it in ipairs(items) do
-        if len + #it + 1 > 230 then chunks[#chunks + 1] = table.concat(cur, ","); cur, len = {}, 0 end
-        cur[#cur + 1] = it; len = len + #it + 1
+    sendChunks("BS", items, to)
+    -- My Showcase and Collection, as I see them.
+    local show, rest = Badges.Arrange(ns.meKey, Badges.Mine(), "arranged")
+    local ids = {}
+    for i = 1, Badges.SHOWCASE_N do ids[i] = show[i] and show[i].b.id or "-" end
+    for _, it in ipairs(rest) do ids[#ids + 1] = it.b.id end
+    sendChunks("BV", ids, to)
+end
+
+-- Their Showcase and Collection's order, in parts.
+local layoutParts = {}     -- key -> { n, got = { [part] = { id... } } }
+local function onBV(f, sender, key)
+    local part, parts = tonumber(f[3]), tonumber(f[4])
+    if not (part and parts) or part < 1 or parts < 1 or parts > 50 or part > parts then return end
+    local p = layoutParts[key]
+    if not p or p.n ~= parts then p = { n = parts, got = {} }; layoutParts[key] = p end
+    local ids = {}
+    for t in (f[5] or ""):gmatch("[^,]+") do ids[#ids + 1] = t end
+    p.got[part] = ids
+    for i = 1, parts do if not p.got[i] then return end end
+    layoutParts[key] = nil
+    local all = {}
+    for i = 1, parts do for _, t in ipairs(p.got[i]) do all[#all + 1] = t end end
+    local showcase, order = {}, {}
+    for i = 1, Badges.SHOWCASE_N do showcase[i] = byId[all[i] or ""] and all[i] or false end
+    for i = Badges.SHOWCASE_N + 1, #all do
+        if byId[all[i]] and #order < 1000 then order[#order + 1] = all[i] end
     end
-    chunks[#chunks + 1] = table.concat(cur, ",")
-    for i, s in ipairs(chunks) do
-        ns.Comm.Send({ "BS", ns.Comm.PROTO, i, #chunks, s }, "WHISPER", to)
+    layouts[key] = { showcase = showcase, order = order }
+    ns.fire("BADGES", key)
+end
+
+-- Their Showcase changed (to the guild): its slots; their Collection's
+-- order stays what I last heard.
+local function onBW(f, sender, key)
+    local showcase = {}
+    for i = 1, Badges.SHOWCASE_N do
+        local id = f[2 + i]
+        showcase[i] = (id and byId[id]) and id or false
     end
+    local old = layouts[key]
+    layouts[key] = { showcase = showcase, order = old and old.order }
+    ns.fire("BADGES", key)
 end
 
 local function onBS(f, sender, key)
@@ -806,8 +1118,13 @@ local function onBS(f, sender, key)
 end
 
 ns.onLogin(function()
+    freshStart()
     ns.Comm.handlers.BQ = function(f, sender, key) answer(sender, key) end
     ns.Comm.handlers.BS = onBS
+    ns.Comm.handlers.BV = onBV
+    ns.Comm.handlers.BW = onBW
+    -- (my Showcase to the guild once, a while after login, if I've set one)
+    ns.after(30, function() if ns.db and ns.db.badgeLayout then tellShowcase() end end, "showcase at login")
     record()
     ns.every(30, record, "badge weeks")
     ns:On("PLAYER_LOGOUT", record)

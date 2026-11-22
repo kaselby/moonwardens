@@ -84,6 +84,8 @@ local function matches(q, n)
     return out
 end
 
+OUI.Matches = matches        -- (the Badge Chest's name field too)
+
 ---------------------------------------------------------------------------
 -- Award Progress
 ---------------------------------------------------------------------------
@@ -121,10 +123,8 @@ local function entriesOf(cat)
 end
 
 local function sectionLabel(id)
-    for _, top in ipairs(Badges.CATEGORIES) do
-        for _, c in ipairs(top.children or {}) do
-            if c.id == id then return top.name .. " > " .. c.name end
-        end
+    for _, p in ipairs(Badges.Pages()) do
+        if p.id == id then return p.top and (p.top .. " > " .. p.name) or p.name end
     end
 end
 
@@ -135,6 +135,10 @@ end
 
 local function iconText(icon, size)
     local n = type(icon) == "table" and icon[1] or icon
+    -- (the first the game has)
+    if type(icon) == "table" and K.iconExists then
+        for _, x in ipairs(icon) do if K.iconExists("Interface\\Icons\\" .. x) then n = x; break end end
+    end
     return n and ("|TInterface\\Icons\\%s:%d:%d|t "):format(n, size or 16, size or 16) or ""
 end
 
@@ -240,16 +244,19 @@ local function buildAward(f, parent, w)
     a.badge = dropdown(280, X, -130, "Pick a badge")
     if a.section and a.badge then
         a.section:SetupMenu(function(_, root)
+            local function isPicked(id) return state.section == id end
             for _, top in ipairs(Badges.CATEGORIES) do
-                local subs = {}
-                for _, c in ipairs(top.children or {}) do
-                    if #entriesOf(c.id) > 0 then subs[#subs + 1] = c end
-                end
-                if #subs > 0 then
-                    local sub = root:CreateButton(top.name)
-                    for _, c in ipairs(subs) do
-                        sub:CreateRadio(c.name, function(id) return state.section == id end, pickSection, c.id)
+                if top.children then
+                    local subs = {}
+                    for _, c in ipairs(top.children) do
+                        if #entriesOf(c.id) > 0 then subs[#subs + 1] = c end
                     end
+                    if #subs > 0 then
+                        local sub = root:CreateButton(top.name)
+                        for _, c in ipairs(subs) do sub:CreateRadio(c.name, isPicked, pickSection, c.id) end
+                    end
+                elseif #entriesOf(top.id) > 0 then
+                    root:CreateRadio(top.name, isPicked, pickSection, top.id)
                 end
             end
         end)
@@ -501,8 +508,10 @@ end
 -- Audit Log
 ---------------------------------------------------------------------------
 local function describe(e)
-    local b = Badges.Get(Badges.Resolve(e))
-    local title = b and Badges.Title(b) or e.badge
+    local id = Badges.Resolve(e)
+    local b = Badges.Get(id)
+    -- (its name, and its id after it: "Wrath of the Kaldorei (lt2)")
+    local title = (b and (Badges.Title(b) .. " ") or "") .. "|cff9d9d9d(" .. tostring(id) .. ")|r"
     local line, meta
     local function quote(s) return (s and s ~= "") and ("\"" .. s .. "\"") or "No note." end
     if e.kind == "award" then
@@ -538,7 +547,7 @@ local function describe(e)
         meta = quote(e.note)
     elseif e.kind == "hunt" then
         local t = b and b.target
-        line = ("%s hunted %s%s"):format(who(e.who), t and ("Lv %d %s"):format(b.level, t.name) or "a bounty",
+        line = ("%s hunted %s%s"):format(who(e.who), t and ("Lv %d %s"):format(b.level, t.name) or "a Hunt Target",
             (e.n or 0) == 1 and "  |cff1eff00passed|r" or "  |cffff4040failed checks|r")
         local g = ns.Ledger.GrantFor(e.id)
         meta = (g and ("Granted by %s.  "):format(K.nameOf(g.by)) or "") .. (e.note or "")
@@ -801,7 +810,7 @@ function OUI.Open(key)
 end
 
 UI.AddPage(6, "Officers", build, refresh,
-    { order = 3, icon = { "INV_Misc_Note_06", "INV_Scroll_03" }, tooltip = "Officers",
+    { order = 3, icon = { "INV_Misc_Note_06", "INV_Scroll_03" }, tooltip = "Officers", title = "Officer",
       bgAtlas = "Legacy-Rewards-Tracker-background",
       visible = function() return ns.Ledger and ns.Ledger.CanAward() end })
 
@@ -832,17 +841,17 @@ function OUI.AskDeny(id, line)
     })
 end
 
--- Granting Bounty Hunter from a logged hunt: to its hunter, for its bounty.
+-- Granting a Huntress Training Hunt Target from a logged hunt: to its hunter, for its target.
 function OUI.AskGrantHunt(id, line)
     ns.Dialog.Show({
-        text = ("Grant this bounty for this hunt?\n\n%s"):format(line),
+        text = ("Grant this Hunt Target for this hunt?\n\n%s"):format(line),
         accept = "Grant",
         onAccept = function()
             local h = ns.Ledger.Find(id)
             if not h then return end
             local bid = Badges.Resolve(h)
             local b = Badges.Get(bid)
-            local ok, err = ns.Ledger.Award(h.who, bid, 0, b and ("Hunt of " .. ns.Dialog.When(h.at)) or "Bounty", { ref = h.id })
+            local ok, err = ns.Ledger.Award(h.who, bid, 0, b and ("Hunt of " .. ns.Dialog.When(h.at)) or "Hunt Target", { ref = h.id })
             if not ok then failed(err, "Not granted.") end
         end,
     })

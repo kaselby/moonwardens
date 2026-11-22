@@ -28,6 +28,7 @@ Ledger.lua
 Hunt.lua
 Captures.lua
 BadgesUI.lua
+BadgeChest.lua
 OfficerUI.lua
 GuildTabs.lua
 RosterLayer.lua
