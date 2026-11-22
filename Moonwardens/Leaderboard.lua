@@ -521,13 +521,15 @@ local function refresh(f)
     else
         f.empty:Hide()
     end
-    local foot = "Counts Horde killed in Ashenvale or at Stonetalon Peak by you or your group, honour or not. Weeks run from the Tuesday reset. Only members with the addon appear."
+    local foot = "Counts Horde killed by you or your group in Ashenvale/Stonetalon Peak."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
-            local cr, cg, cb = ns.classColor(last.cls)
-            foot = foot .. (" Last week's winner: |cff%02x%02x%02x%s|r (%d)."):format(
-                cr * 255, cg * 255, cb * 255, last.name, last.c)
+            -- (their name and colour as in the rows: the RP ones when on, else class)
+            local cr, cg, cb = ns.RP.Color(last.key)
+            if not cr then cr, cg, cb = ns.classColor(last.cls) end
+            foot = foot .. ("\nLast week's winner: |cff%02x%02x%02x%s|r (%d)"):format(
+                cr * 255, cg * 255, cb * 255, ns.RP.Name(last.key) or last.name, last.c)
         end
     end
     f.foot:SetText(foot)
