@@ -202,11 +202,28 @@ UI.SETTINGS = {
 }
 
 local function buildSettings(f)
-    -- Everything else lives on the guild window now: say so, up top.
+    -- Everything else lives on the guild window now: say so, up top, in two
+    -- centred lines - large: up to twice the text's size, as large as lets
+    -- the longer line fit the page's width.
     local moved = UI.Text(f, nil, nil, "CENTER")
+    local file, size, flags = moved:GetFont()
+    size = size or 12
+    local big = size * 2
+    local avail = f:GetWidth()
+    if not avail or avail < 100 then avail = WIDTH - 32 end
+    if file then
+        local probe = UI.Text(f, nil, nil, "LEFT")
+        probe:SetFont(file, big, flags)
+        probe:SetWordWrap(false)
+        probe:SetText("to your Guild & Communities tab (J by default).")
+        local w = ns.try(probe.GetStringWidth, probe) or 0
+        probe:Hide()
+        if w > avail - 8 then big = math.max(size, math.floor(big * (avail - 8) / w)) end
+        moved:SetFont(file, big, flags)
+    end
     moved:SetPoint("TOPLEFT", 0, 0); moved:SetPoint("TOPRIGHT", 0, 0)
-    moved:SetText("Moonwardens has moved to your Guild & Communities tab (|cffffd100J|r by default).")
-    local y = -26
+    moved:SetText("Moonwardens has moved\nto your Guild & Communities tab (|cffffd100J|r by default).")
+    local y = -(big * 2 + 14)
     f.checks = {}
     for _, s in ipairs(UI.SETTINGS) do
         if not s[2] then
@@ -237,9 +254,10 @@ UI.AddPage(9, "Settings", buildSettings, refreshSettings)
 
 -- Once (per account): where Moonwardens went, in our dialog, a few seconds
 -- after loading in. Only its button closes it (not Escape); after that it
--- never shows again. Closed any other way, it shows again next time.
+-- never shows again (till a fresh start, Badges.lua). Closed any other way,
+-- it shows again next time. (Seen or not: asked only as it's due, after the
+-- fresh start has had its say.)
 ns.onLogin(function()
-    if ns.db.movedNoticeSeen then return end
     ns.after(4, function()
         if ns.db.movedNoticeSeen or not ns.Dialog then return end
         ns.Dialog.Show({

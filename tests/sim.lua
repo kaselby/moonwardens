@@ -687,17 +687,17 @@ check(Ver.Newer("0.6.0", "0.6.0-test") and not Ver.Newer("0.6.0-test", "0.6.0"),
 check(Ver.Newer("0.10.0", "0.9.9") and Ver.Newer("0.6.1-test", "0.6.0") and not Ver.Newer("0.6.0", "0.6.0"), "version order")
 check(countSent("V") >= 1 and lastSent("V").m == "V|1|" .. ns.VERSION, "my version said after login")
 local before = #W.prints
-recv("V|1|0.7.0", "Thalanor-Oakheart")
-check(#W.prints == before and Ver.Newest() == nil, "one non-officer saying 0.7.0 is not enough")
+recv("V|1|0.8.0", "Thalanor-Oakheart")
+check(#W.prints == before and Ver.Newest() == nil, "one non-officer saying 0.8.0 is not enough")
 recv("V|1|9.9.9-test", "Caelith-Shade"); recv("V|1|9.9.9-test", "Thalanor-Oakheart")
 check(Ver.Newest() == nil, "test builds never prompt an update")
-recv("V|1|0.7.0", "Caelith-Shade")
-check(Ver.Newest() == "0.7.0" and W.prints[#W.prints]:find("0.7.0 is out", 1, true), "two guildies: update reminder")
-recv("V|1|0.7.1", "Thalanor-Oakheart"); recv("V|1|0.7.1", "Caelith-Shade")
-check(#W.prints == before + 1 and Ver.Newest() == "0.7.1", "said once per session; tooltip follows the newest")
+recv("V|1|0.8.0", "Caelith-Shade")
+check(Ver.Newest() == "0.8.0" and W.prints[#W.prints]:find("0.8.0 is out", 1, true), "two guildies: update reminder")
+recv("V|1|0.8.1", "Thalanor-Oakheart"); recv("V|1|0.8.1", "Caelith-Shade")
+check(#W.prints == before + 1 and Ver.Newest() == "0.8.1", "said once per session; tooltip follows the newest")
 local mt = { lines = {}, AddLine = function(self, l) self.lines[#self.lines + 1] = l end }
 ns.UI.MinimapTooltip(mt)
-check(table.concat(mt.lines, "\n"):find("Update available: 0.7.1", 1, true), "minimap tooltip shows the update")
+check(table.concat(mt.lines, "\n"):find("Update available: 0.8.1", 1, true), "minimap tooltip shows the update")
 -- Someone behind me logs in: I answer once (unless someone else does)
 W.advance(301)
 local nV = countSent("V")
@@ -1166,6 +1166,76 @@ do
     check(k and r.lt1.times == 1 and r.lt2.times == 1 and r.lt3.times == 0, "granted kills silver: copper too")
     -- (the test's events: gone again)
     for _, e in ipairs({ g, p, rv, k }) do if e then ns.db.ledger[e.id] = nil end end
+    GetServerTime = realGST
+end
+
+-- A fresh start in this week (moved here for the check), its week carried
+-- over (FRESH_KEEPS_WEEK): my kills this week, all of them, toward the
+-- kills badges, and a guildie's from the board too. Without it, only kills
+-- after the fresh start ran here.
+do
+    local B, LB = ns.Badges, ns.Leaderboard
+    local keep = { B.FRESH_START, B.FRESH_KEEPS_WEEK, ns.db.freshStart, ns.db.badgeFreshBase, ns.db.badgeClaimed }
+    local cur = LB.Week()
+    local mine = LB.Mine(cur)
+    B.FRESH_START = LB.WeekStart(cur) + 60
+    B.FRESH_KEEPS_WEEK = true
+    ns.db.freshStart = nil
+    ns.db.movedNoticeSeen, ns.db.badgeTabNew, ns.db.badgeUnseen = true, nil, {}
+    B.FreshStartLocal()
+    check(mine > 0 and B.MyWeeks()[cur] == mine, "fresh start, week carried over: all " .. mine .. " of my kills this week count")
+    check(ns.db.movedNoticeSeen == nil and ns.db.badgeKnown == nil and next(ns.db.badgeNew) == nil,
+        "fresh start: the moved notice to show again, the new-badge dots as on a first load")
+    ns.BadgesUI.New.Check(); W.advance(1)
+    check(ns.db.badgeTabNew and next(ns.db.badgeUnseen) ~= nil, "fresh start: the Badges tab's dot, and the badges not earned new to see")
+    local tha = ns.key("Thalanor-Oakheart")
+    local onBoard = (ns.db.board[cur] or {})[tha]
+    check(onBoard and B.WeeksOf(tha)[cur] == onBoard.c, "fresh start, week carried over: a guildie's kills this week, from the board")
+    B.FRESH_KEEPS_WEEK = false
+    ns.db.freshStart = nil
+    B.FreshStartLocal()
+    check((B.MyWeeks()[cur] or 0) == 0 and B.WeeksOf(tha)[cur] == nil, "fresh start, week not carried: none of this week's kills before it")
+    B.FRESH_START, B.FRESH_KEEPS_WEEK, ns.db.freshStart, ns.db.badgeFreshBase, ns.db.badgeClaimed = unpack(keep)
+end
+
+-- Vengeance Abides (the rank of Huntress): only a Huntress's own client
+-- files its request, once. An officer (above it), or any other rank,
+-- logging in for the first time files none.
+do
+    local B, L = ns.Badges, ns.Ledger
+    local realGST = GetServerTime
+    GetServerTime = function() return math.floor(B.FRESH_START + 400000 + W.clock) end   -- (whole seconds, as the game's)
+    local keepRank, keepAsked, keepTest = W.roster[1][2], ns.db.rankRequested, ns.db.testMode
+    ns.db.testMode = nil
+    local function asked()
+        local n = 0
+        for _, m in ipairs(W.sent) do
+            if m.m:find("^BL|1|[^|]+|request|%d+|" .. ns.meKey .. "|" .. ns.meKey .. "|hr|") then n = n + 1 end
+        end
+        return n
+    end
+    local function firstLogin(rank)
+        W.roster[1][2] = rank
+        ns.Roster.Build()
+        ns.db.rankRequested = {}                          -- (as on a first login)
+        L.CheckClaims()
+        W.advance(5)                                      -- (anything sent goes out)
+    end
+    local n0 = asked()
+    firstLogin("Warden-General")
+    check(asked() == n0 and not ns.db.rankRequested.hr, "an officer's first login: no Vengeance Abides request")
+    firstLogin("Glaivemistress")
+    check(asked() == n0, "the guild's top rank: none either")
+    firstLogin("Sentinel")
+    check(asked() == n0, "a rank below Huntress: none")
+    firstLogin("Huntress")
+    L.CheckClaims(); W.advance(5)
+    check(asked() == n0 + 1, "and not again")
+    -- (put back: the rank, and the request made here gone from the ledger)
+    for id, e in pairs(ns.db.ledger) do if e.kind == "request" and e.badge == "hr" and e.who == ns.meKey then ns.db.ledger[id] = nil end end
+    W.roster[1][2] = keepRank
+    ns.Roster.Build()
+    ns.db.rankRequested, ns.db.testMode = keepAsked, keepTest
     GetServerTime = realGST
 end
 

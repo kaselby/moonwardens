@@ -1,6 +1,6 @@
 -- Core: namespace, saved settings, events, timers, safe reads, slash command.
 local ADDON, ns = ...
-ns.VERSION = "0.6.0"
+ns.VERSION = "0.7.0"
 _G.Moonwardens = ns -- for /dump and other addons; nothing reads it back
 
 ---------------------------------------------------------------------------

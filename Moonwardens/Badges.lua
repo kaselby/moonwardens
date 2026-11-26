@@ -26,11 +26,15 @@ ns.Badges = Badges
 -- THE FRESH START: nothing from before this moment (server time, UTC)
 -- counts toward any badge - no Ledger event (awards, claims, hunts,
 -- requests, the whole Audit Log), no capture, no week of kills before its
--- week. Its own week counts only the kills after each client first ran
--- this version (a client first running it a later week: none of that
--- week). Every client wipes its own copy once (Ledger.lua, Captures.lua,
+-- week. Every client wipes its own copy once (Ledger.lua, Captures.lua,
 -- below). Move it later only to wipe again; never earlier.
-Badges.FRESH_START = 1795339200          -- 2026-11-22 09:20 UTC
+-- Its own week: with FRESH_KEEPS_WEEK, every kill of that whole week (the
+-- Leaderboard's counts, from before the fresh start too) counts toward the
+-- kills badges - the week carried over. Without it, only the kills after
+-- each client first ran this version (a client first running it a later
+-- week: none of that week).
+Badges.FRESH_START = 1795720800          -- 2026-11-26 19:20 UTC (0.7.0)
+Badges.FRESH_KEEPS_WEEK = true
 
 -- The week of the fresh start (the Leaderboard's), once it can be known.
 function Badges.FreshWeek()
@@ -255,9 +259,10 @@ local RITUAL = {
     { id = "hp", cat = "wyldhunt", kind = "granted", stack = true, points = 10, noInfo = true,
       name = "Cadre of Vengeance", icon = { "Ability_Tracking", "Ability_Hunter_BeastCall" },
       desc = "Aid another Moonwarden in the successful completion of their Wyld Hunt." },
-    -- Not automatic: officers are promoted through Huntress, so holding the
-    -- rank (or one above) only files a request (autoRequest); an officer
-    -- approves it in Approvals before it counts.
+    -- Not automatic: holding the rank of Huntress itself (not one above it:
+    -- officers, promoted through it, never file one - Badges.HasRank) only
+    -- files a request (autoRequest), once; an officer approves it in
+    -- Approvals before it counts.
     { id = "hr", cat = "wyldhunt", kind = "granted", rank = "Huntress", autoRequest = "rank", points = 100, noInfo = true,
       name = "Vengeance Abides", icon = { "achievement_boss_councilsentinel", "Ability_Mount_WhiteTiger" },
       desc = "Earn the rank of Huntress." },
@@ -1031,8 +1036,9 @@ local function record()
     end
 end
 
--- (the fresh start: weeks before its week dropped; its week, the kills
--- since this client first ran it - badgeFreshBase is what it had then)
+-- (the fresh start: weeks before its week dropped; its week, all of it
+-- (FRESH_KEEPS_WEEK), or the kills since this client first ran it -
+-- badgeFreshBase is what it had then)
 function Badges.MyWeeks()
     record()
     local raw = ns.db and ns.db.badgeWeeks or {}
@@ -1042,7 +1048,7 @@ function Badges.MyWeeks()
     local out = {}
     for w, c in pairs(raw) do
         if type(w) == "number" then
-            if w > fw then out[w] = c
+            if w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK) then out[w] = c
             elseif w == fw and base then out[w] = math.max(0, c - base) end
         end
     end
@@ -1050,7 +1056,9 @@ function Badges.MyWeeks()
 end
 
 -- Once per fresh start, on this client: its own copy wiped (here: the
--- weeks of kills, and what was claimed of them).
+-- weeks of kills, and what was claimed of them), its new-badge dots as on
+-- a first load (/mw test newdots: every badge not earned new to see), and
+-- the "Moonwardens has moved" notice to show once more (UI.lua).
 local function freshStart()
     local db = ns.db
     if not db or db.freshStart == Badges.FRESH_START then return end
@@ -1059,9 +1067,14 @@ local function freshStart()
     record()
     local LB = ns.Leaderboard
     local cur = LB.Week()
-    -- (its week: what's counted so far is from before; a later week: none of it)
-    db.badgeFreshBase = (cur == fw) and math.max((db.badgeWeeks or {})[fw] or 0, LB.Mine(fw) or 0) or nil
+    -- (its week: what's counted so far is from before - kept, FRESH_KEEPS_WEEK;
+    -- else taken off. A later week: none of it)
+    db.badgeFreshBase = (cur == fw and not Badges.FRESH_KEEPS_WEEK)
+        and math.max((db.badgeWeeks or {})[fw] or 0, LB.Mine(fw) or 0) or nil
     db.badgeClaimed, db.rankRequested, db.placementClaimed = {}, {}, {}
+    db.badgeKnown, db.badgeNew, db.badgeTabNew = nil, {}, nil
+    db.badgeListed, db.badgeUnseen = nil, {}
+    db.movedNoticeSeen = nil
     db.freshStart = Badges.FRESH_START
 end
 Badges.FreshStartLocal = freshStart
@@ -1101,13 +1114,14 @@ function Badges.WeeksOf(key)
     if key == ns.meKey then return Badges.MyWeeks() end
     local weeks = {}
     -- (the fresh start: nothing before its week; the board's counts of its
-    -- week aren't theirs to trust - they started before it - only theirs)
+    -- week are theirs too when the week is carried over (FRESH_KEEPS_WEEK) -
+    -- else not to be trusted, they started before it - only theirs)
     local fw = Badges.FreshWeek() or -1
     local o = others[key]
     if o then for w, c in pairs(o.weeks) do if w >= fw then weeks[w] = c end end end
     local board = ns.db and ns.db.board or {}
     for w, t in pairs(board) do
-        local e = type(w) == "number" and w > fw and type(t) == "table" and t[key]
+        local e = type(w) == "number" and (w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK)) and type(t) == "table" and t[key]
         if e and e.c and e.c > (weeks[w] or 0) then weeks[w] = e.c end
     end
     return weeks
