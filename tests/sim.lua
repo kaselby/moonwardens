@@ -726,6 +726,28 @@ do
     MoonwardensBadgeChest:Hide()
 end
 
+-- The Audit Log and Approvals: hovering an entry shows its badge (the top
+-- of every badge tooltip), the line in full, and the date.
+do
+    local B, L = ns.Badges, ns.Ledger
+    local realGST = GetServerTime
+    GetServerTime = function() return B.FRESH_START + 300000 + W.clock end
+    local e = L.Award("thalanor oakheart", "pt1", 1, "tooltip test")
+    ns.OfficerUI.Toggle()
+    local pg = ns.OfficerUI.Page()
+    for _, nb in ipairs(pg.nav) do if nb.id == "log" then nb._scripts.OnClick(nb) end end
+    local row = pg.logRows[1]
+    check(row and row.event == e and row._scripts.OnEnter, "Audit Log: the newest entry, hoverable")
+    row._scripts.OnEnter(row)
+    local tip = table.concat(GameTooltip.lines, "\n")
+    check(tip:find(B.Title(B.Get("pt1")), 1, true) and tip:find(row.line:GetText(), 1, true)
+        and tip:find(date("%B %d, %Y", e.at), 1, true), "Audit Log tooltip: the badge, the full line, the date:\n" .. tip)
+    row._scripts.OnLeave(row)
+    ns.OfficerUI.Toggle()
+    ns.db.ledger[e.id] = nil
+    GetServerTime = realGST
+end
+
 -- Badge points: hidden, until an officer shows them (/mw test badgepoints)
 check(not ns.BadgesUI.ShowPoints(), "badge points hidden")
 SlashCmdList.MOONWARDENS("test badgepoints on")

@@ -604,6 +604,12 @@ local function newLogRow(parent)
     end
     r:Place(1)
     r.meta:SetPoint("RIGHT", r.kind, "LEFT", -8, 0)
+    -- Hover: its badge, the line in full, and when (K.logTooltip).
+    r:EnableMouse(true)
+    r:SetScript("OnEnter", function(self)
+        if self.tipLine then K.logTooltip(self, self.tipBadge, self.tipLine, self.tipWhen) end
+    end)
+    r:SetScript("OnLeave", function() GameTooltip:Hide() end)
     return r
 end
 
@@ -660,6 +666,7 @@ local function fillLog(f, approvals)
         r.line:SetText(line)
         r.meta:SetText(meta)
         r.when:SetText(date("%m/%d/%y %H:%M", e.at))
+        r.tipBadge, r.tipLine, r.tipWhen = b, line, date("%B %d, %Y at %H:%M", e.at)
         r.kind:SetText(e.test and "|cffff8040Test|r" or (e.kind == "award" or e.kind == "revoke") and "|cffffd100Granter|r"
             or e.kind == "hunt" and "|cff40c0ffHunt|r" or e.kind == "request" and "|cffffd100Request|r"
             or e.kind == "deny" and "|cffffd100Granter|r" or "|cff9d9d9dAutomatic|r")
@@ -764,6 +771,7 @@ local function refresh(f)
 end
 
 function OUI.Picker() return page and page.award and page.award.picker end   -- (tests)
+function OUI.Page() return page end   -- (tests)
 
 function OUI.Refresh()
     if page and page:IsVisible() then refresh(page) end

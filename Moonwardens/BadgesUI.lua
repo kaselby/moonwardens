@@ -469,7 +469,11 @@ local function addTiers(track, res)
     GameTooltip:Show()
 end
 
-local function badgeTooltip(owner, b, e)
+-- A badge tooltip's top, every one the same: the title in its tier's
+-- colour (the shield at the right with points shown), its icon at the left.
+-- tipFinish, after the lines under it: the coin on the icon's corner and the
+-- points on the shield. (badgeTooltip; logTooltip, the Audit Log's.)
+local function tipBegin(owner, b)
     local deco = tipDecor()
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local c = Badges.TIER_COLOR[b.tier] or { 1, 0.82, 0 }
@@ -495,36 +499,11 @@ local function badgeTooltip(owner, b, e)
     })
     if file and not placed then pcall(GameTooltip.AddTexture, GameTooltip, file) end
     if ns.UI and ns.UI.TooltipTitleSize then ns.UI.TooltipTitleSize(trpNameSize()) end
-    GameTooltip:AddLine(b.desc, 1, 1, 1, true)
-    -- How it stands.
-    local lines = {}
-    if e.times > 0 then
-        local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount"
-            or b.kind == "placement" or b.stack
-        local when = tipDate(e.lastAt)
-        if again then
-            local n = ("Earned %d time%s"):format(e.times, e.times == 1 and "" or "s")
-            lines[#lines + 1] = { when and (n .. ", last on " .. when) or n, 0.12, 1, 0 }
-        else
-            lines[#lines + 1] = { when and ("Earned on " .. when) or "Earned", 0.12, 1, 0 }
-        end
-    end
-    if b.kind == "selflifetime" or b.kind == "manual" or b.kind == "lifetime" then
-        lines[#lines + 1] = { ("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0 }
-    elseif b.kind == "granted" then
-        lines[#lines + 1] = { "Granted by " .. Badges.Granters(b) .. ".", 1, 0.82, 0 }
-    elseif b.kind == "parent" then
-        lines[#lines + 1] = { ("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0 }
-    elseif b.kind == "rank" then
-        lines[#lines + 1] = { ("Comes with the rank of %s."):format(b.rank), 1, 0.82, 0 }
-    end
-    -- (an addon it needs: in gold under its progress, as on its card)
-    local needs = Badges.Needs(b)
-    if needs then lines[#lines + 1] = { needs, 1, 0.82, 0 } end
-    if #lines > 0 then
-        GameTooltip:AddLine(" ")
-        for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], true) end
-    end
+    return { deco = deco, showPts = showPts, pts = pts, sw = sw }
+end
+
+local function tipFinish(b, h)
+    local deco, showPts, pts, sw = h.deco, h.showPts, h.pts, h.sw
     GameTooltip:Show()
     -- Our pieces over it: the coin on the icon's corner, the points on the shield.
     deco:SetFrameLevel(GameTooltip:GetFrameLevel() + 5)
@@ -556,6 +535,60 @@ local function badgeTooltip(owner, b, e)
         deco.points:Hide()
     end
     deco:Show()
+end
+
+local function badgeTooltip(owner, b, e)
+    local h = tipBegin(owner, b)
+    GameTooltip:AddLine(b.desc, 1, 1, 1, true)
+    -- How it stands.
+    local lines = {}
+    if e.times > 0 then
+        local again = b.kind == "weekly" or b.kind == "manualweekly" or b.kind == "selfweekly" or b.kind == "selfcount"
+            or b.kind == "placement" or b.stack
+        local when = tipDate(e.lastAt)
+        if again then
+            local n = ("Earned %d time%s"):format(e.times, e.times == 1 and "" or "s")
+            lines[#lines + 1] = { when and (n .. ", last on " .. when) or n, 0.12, 1, 0 }
+        else
+            lines[#lines + 1] = { when and ("Earned on " .. when) or "Earned", 0.12, 1, 0 }
+        end
+    end
+    if b.kind == "selflifetime" or b.kind == "manual" or b.kind == "lifetime" then
+        lines[#lines + 1] = { ("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0 }
+    elseif b.kind == "granted" then
+        lines[#lines + 1] = { "Granted by " .. Badges.Granters(b) .. ".", 1, 0.82, 0 }
+    elseif b.kind == "parent" then
+        lines[#lines + 1] = { ("%d of %d done."):format(e.value or 0, e.goal or 0), 1, 0.82, 0 }
+    elseif b.kind == "rank" then
+        lines[#lines + 1] = { ("Comes with the rank of %s."):format(b.rank), 1, 0.82, 0 }
+    end
+    -- (an addon it needs: in gold under its progress, as on its card)
+    local needs = Badges.Needs(b)
+    if needs then lines[#lines + 1] = { needs, 1, 0.82, 0 } end
+    if #lines > 0 then
+        GameTooltip:AddLine(" ")
+        for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], true) end
+    end
+    tipFinish(b, h)
+end
+
+-- An Audit Log or Approvals entry: its badge (the top every badge tooltip
+-- has), the entry's line in full (the row cuts it off), and when, in gold
+-- as a badge's progress is. No badge (an id gone since): the line and date.
+local function logTooltip(owner, b, line, when)
+    if not b then
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(line, 1, 1, 1, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(when, 1, 0.82, 0)
+        GameTooltip:Show()
+        return
+    end
+    local h = tipBegin(owner, b)
+    GameTooltip:AddLine(line, 1, 1, 1, true)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(when, 1, 0.82, 0)
+    tipFinish(b, h)
 end
 
 ---------------------------------------------------------------------------
@@ -1962,5 +1995,5 @@ BUI.Kit = {
     font = font, text = text, bump = bump, atlas = atlas, commas = commas, nameOf = nameOf, setIcon = setIcon, iconExists = iconExists,   -- (setIcon, badgeTooltip: the roster's Top Badges too)
     newIcon = newIcon, setBadgeIcon = setBadgeIcon, newBar = newBar, newHeading = newHeading, newShield = newShield,
     newScroll = newScroll, newCatButton = newCatButton, styleCatButton = styleCatButton,
-    badgeTooltip = badgeTooltip, newBoard = newBoard,
+    badgeTooltip = badgeTooltip, logTooltip = logTooltip, newBoard = newBoard,
 }
