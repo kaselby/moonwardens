@@ -433,7 +433,14 @@ function Ledger.ManualFor(who)
     for _, e in ipairs(each()) do
         if e.kind == "revoke" and e.ref then revoked[e.ref] = true end
     end
-    for _, e in ipairs(each()) do
+    -- (oldest first: a grant raises the count to its goal as of then, and
+    -- what's added after counts on top)
+    local events = each()
+    table.sort(events, function(a, b)
+        if (a.at or 0) ~= (b.at or 0) then return (a.at or 0) < (b.at or 0) end
+        return tostring(a.id) < tostring(b.id)
+    end)
+    for _, e in ipairs(events) do
         if e.who == who and e.kind == "claim" then
             if revoked[e.id] then
                 -- (a revoked claim: one fewer of a badge the client counts itself)
@@ -459,6 +466,18 @@ function Ledger.ManualFor(who)
                 wk[e.week or 0] = (wk[e.week or 0] or 0) + e.n
                 out.weekly[c] = wk
             else
+                -- A badge counted toward (patrols, all time) granted
+                -- outright: its count goes to the goal, if it was short.
+                -- (Not the weekly ones: a grant is a week's on its own.)
+                local gb = ns.Badges.Get(badge)
+                if gb and gb.kind == "manual" then
+                    local c = ns.Badges.CounterOf(gb)
+                    if (out.progress[c] or 0) < (gb.goal or 0) then
+                        out.progress[c] = gb.goal
+                        if (e.week or 0) > (out.progressLast[c] or -1) then out.progressLast[c] = e.week end
+                        if (e.at or 0) > (out.progressLastAt[c] or 0) then out.progressLastAt[c] = e.at end
+                    end
+                end
                 local g = out.grants[badge] or { times = 0 }
                 g.times = g.times + 1
                 if not g.last or (e.week or 0) > g.last then g.last = e.week end

@@ -10,15 +10,19 @@
 --   support   Splintertree Post taken for our side while I was inside one
 --             of its two approaches, Dor'Danil Barrow Den or Raynewood
 --             Retreat (I'm Doing My Part!);
---   victory   TOTAL VICTORY on the Ashenvale front (Tor ilisar'thera'nal!),
---             with me in the group (party or raid) that took it: I or a
---             group member inside the last objective taken. Only Overlord
---             can tell, so a guildie with it who sees our group take it
---             tells the group (TV|1|front|time); guildies in it without
---             Overlord count it from that. Each victory counts once
---             however many tell it (credit: one per front within 10 min).
---             Solo, it counts if I was inside Splintertree Post, the last
---             objective, at some time in the 10 minutes before it fell.
+--   victory   TOTAL VICTORY on the Ashenvale front (Tor ilisar'thera'nal!):
+--             I'm in Ashenvale, and in the group (party or raid) of those
+--             inside the enemy's capital (Splintertree Post, the last
+--             objective) as it fell - I or a member; solo, I. Only Overlord
+--             can tell, so a guildie with it who counts it tells the group
+--             once (TV|1|front|time); guildies in it, in Ashenvale, without
+--             Overlord count it from that. Each victory counts once however
+--             many tell it, however often (credit: one per front within
+--             SAME_CAPTURE.victory). Overlord may learn of it late (its last
+--             points' syncs, or the announcement, come in after), and dates
+--             it by the capital's fall: up to VICTORY_LATE late still
+--             counts. Each one Overlord reports, and whether it counted, is
+--             kept (db.victoryLog; /mw test victory).
 --
 -- Read from Overlord (an addon of its own; nothing of it is changed):
 -- Overlord.ZoneDatabase (objectives: centre, radius, owner, status,
@@ -57,7 +61,7 @@ local AWAY_EVERY = 10       -- off the war maps: look this often (s)
 local SAME_CAPTURE = { captures = 60, support = 60,
                        outposts = 240, ashenvale_outposts = 240, shobekaran = 240, lesi_cave = 240,
                        forts = 540,
-                       victory = 600 }   -- (one victory, heard twice)
+                       victory = 1800 }  -- (one victory, heard from a whole raid; the next is hours off at least)
 local function sameCapture(series, a, b)
     return math.abs((a or 0) - (b or 0)) < (SAME_CAPTURE[series or "captures"] or 60)
 end
@@ -84,6 +88,8 @@ Captures.REGION = {
 }
 
 local spans = {}            -- "kind:id" -> { { from, to }, ... } server times I was inside, newest last
+                            -- ("group:id": a member of my group was)
+local noteGroupInside       -- (Total Victory, below)
 local seen = {}             -- "kind:id" -> capture time last seen (false: never captured; nil: not looked at)
 local nextAway = 0
 local deduped = false
@@ -169,6 +175,7 @@ local function credit(series, id, name, ct, what, quiet)
     if not quiet then ns.print(("|cff1eff00%s|r %s"):format(what, tostring(name or id))) end
     ns.fire("BADGES", ns.meKey)
     if ns.Ledger and ns.Ledger.CheckClaims then ns.after(2, ns.Ledger.CheckClaims, "capture claims") end
+    return true                                                         -- (new: counted now)
 end
 
 -- A capture of `key` at `ct`: new since the last look, fresh, ours, and me in it?
@@ -231,6 +238,7 @@ local function tick()
     -- What has been taken for our side. (The capture points listed are the
     -- active front's: they count only when that's Ashenvale.)
     local onAshenvale = O.Fronts and O.Fronts.activeFrontId == CAPTURE_FRONT
+    if onAshenvale and noteGroupInside then noteGroupInside(O, t) end
     for _, zone in ipairs(O.ZoneDatabase) do
         if zone.id then
             local ct = tonumber(zone.capturedTime)
@@ -320,49 +328,104 @@ end
 
 local VICTORY_WHAT = "Tor ilisar'thera'nal! You helped take all of"
 local FINAL_ZONE = "ash_splintertree"   -- Ashenvale's last objective (the Horde's capital there)
-local SOLO_WINDOW = 600                 -- (s) solo: inside it this long before it fell still counts
+local VICTORY_GRACE = 15                -- (s) inside this near its fall counts (Overlord's stamp may be a few s off)
+local VICTORY_LATE = 900                -- (s) heard of this late still counts (Overlord's truce)
+local ASHENVALE_MAP = 1440
+local LOG_KEPT = 10
 
--- Was I inside `key` at any time from `window` s before `ct` up to `ct`?
-local function insideWithin(key, ct, window)
+-- Overlord's capital for `winner` on `frontId` (the last to take), or
+-- Splintertree Post.
+local function capitalOf(O, winner, frontId)
+    local F = O.Fronts
+    if F and F.GetEnemyCapitalId then
+        local ok, id = pcall(F.GetEnemyCapitalId, F, winner, frontId)
+        if ok and type(id) == "string" then return id end
+    end
+    return FINAL_ZONE
+end
+
+-- While on Ashenvale's front in a group: a member inside its capital, kept
+-- as a span ("group:" .. id), as mine are.
+noteGroupInside = function(O, t)
+    if ns.try(IsInGroup) ~= true then return end
+    local capital
+    for _, zone in ipairs(O.ZoneDatabase) do if zone.id == FINAL_ZONE then capital = zone end end
+    if not capital then return end
+    local map = O.Fronts.GetMapID and select(2, pcall(O.Fronts.GetMapID, O.Fronts, VICTORY_FRONT))
+    for _, u in ipairs(groupUnits()) do
+        if ns.try(UnitExists, u) == true and unitInside(O, u, capital, map) then
+            noteInside("group:" .. FINAL_ZONE, t)
+            return
+        end
+    end
+end
+
+-- What became of each victory Overlord told of (newest last).
+local function logVictory(ts, result)
+    ns.db.victoryLog = ns.db.victoryLog or {}
+    local log = ns.db.victoryLog
+    log[#log + 1] = { at = serverNow(), ts = ts, result = result }
+    while #log > LOG_KEPT do table.remove(log, 1) end
+end
+
+-- Was I (or, "group:", a member) inside `key` within VICTORY_GRACE of
+-- any of the times given?
+local function insideNear(key, ...)
     for _, s in ipairs(spans[key] or {}) do
-        if s.from <= ct + 2 and s.to >= ct - window then return true end
+        for i = 1, select("#", ...) do
+            local t = select(i, ...)
+            if t and s.from <= t + VICTORY_GRACE and s.to >= t - VICTORY_GRACE then return true end
+        end
     end
     return false
+end
+
+local function inAshenvale()
+    local map = ns.try(C_Map.GetBestMapForUnit, "player")
+    return map == ASHENVALE_MAP or ns.try(GetZoneText) == "Ashenvale"
 end
 
 local function onVictory(_, frontId, winner, ts)
     local O = overlord()
     ts = tonumber(ts)
     if not (O and frontId == VICTORY_FRONT and ts and winner and winner == O.PlayerFaction) then return end
-    if math.abs(serverNow() - ts) > FRESH_FOR then return end          -- (an old one, replayed)
-    -- Solo: inside Splintertree Post in the 10 minutes before it fell.
-    if not IsInGroup() then
-        local final
-        for _, zone in ipairs(O.ZoneDatabase) do if zone.id == FINAL_ZONE then final = zone end end
-        local ct = final and tonumber(final.capturedTime) or ts
-        if insideWithin("zone:" .. FINAL_ZONE, ct, SOLO_WINDOW) then
-            credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT)
-        end
+    local late = serverNow() - ts
+    if math.abs(late) > VICTORY_LATE then return end                   -- (an old one, replayed)
+    -- Its capital, and when it fell: its stamp, or the victory's (the
+    -- victory repaints the front with one time - the capital's fall, or
+    -- the announcement's, a few seconds on). Who of us was inside it then.
+    -- (Not "the last point taken": a guildmate's sync re-stamps other points.)
+    local capId = capitalOf(O, winner, frontId)
+    local capital
+    for _, zone in ipairs(O.ZoneDatabase) do if zone.id == capId then capital = zone end end
+    local ct = capital and tonumber(capital.capturedTime) or nil
+    local name = capital and capital.name or capId
+    local grouped = ns.try(IsInGroup) == true
+    if not inAshenvale() then
+        logVictory(ts, "not counted: not in Ashenvale")
         return
     end
-    -- My party or raid did it: I or a member inside the last objective taken.
-    local last
-    for _, zone in ipairs(O.ZoneDatabase) do
-        local ct = tonumber(zone.capturedTime)
-        if ct and zone.owner == winner and (not last or ct > tonumber(last.capturedTime)) then last = zone end
-    end
-    if not last then return end
-    local frontMap = O.Fronts.GetMapID and O.Fronts:GetMapID(frontId)
-    local ours = wasInside("zone:" .. last.id, tonumber(last.capturedTime))
-    if not ours then
-        for _, u in ipairs(groupUnits()) do
-            if ns.try(UnitExists, u) == true and unitInside(O, u, last, frontMap) then ours = true; break end
+    local ours = insideNear("zone:" .. capId, ct, ts)
+    if not ours and grouped then
+        ours = insideNear("group:" .. capId, ct, ts)
+        -- (heard as it happens: who of the group stands in it now)
+        if not ours and capital and math.abs(late) <= VICTORY_GRACE then
+            local map = O.Fronts.GetMapID and select(2, pcall(O.Fronts.GetMapID, O.Fronts, frontId))
+            for _, u in ipairs(groupUnits()) do
+                if ns.try(UnitExists, u) == true and unitInside(O, u, capital, map) then ours = true; break end
+            end
         end
     end
-    if not ours then return end
-    credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT)
-    -- Tell the group: its guildies without Overlord count it too.
-    ns.Comm.Send({ "TV", ns.Comm.PROTO, frontId, ts }, IsInRaid() and "RAID" or "PARTY")
+    if not ours then
+        logVictory(ts, (grouped and "not counted: no one in my group was seen inside %s as it fell"
+            or "not counted: not inside %s as it fell (solo)"):format(name))
+        return
+    end
+    if not credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT) then return end   -- (counted already: told already)
+    logVictory(ts, ("counted%s%s"):format(grouped and " (group)" or " (solo)",
+        late > FRESH_FOR and (", heard %d s late"):format(late) or ""))
+    -- Tell the group, once: its guildies without Overlord count it too.
+    if grouped then ns.Comm.Send({ "TV", ns.Comm.PROTO, frontId, ts }, IsInRaid() and "RAID" or "PARTY") end
 end
 
 -- A guildie in my group saw it (Overlord): it counts for me too, if it's
@@ -371,10 +434,21 @@ local function onShared(f, sender, key, channel)
     if channel ~= "PARTY" and channel ~= "RAID" then return end
     local frontId, ts = f[3], tonumber(f[4])
     if frontId ~= VICTORY_FRONT or not ts then return end
-    if math.abs(serverNow() - ts) > FRESH_FOR then return end
-    if not inMyGroup(key) then return end
-    credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT)
+    if math.abs(serverNow() - ts) > VICTORY_LATE then return end
+    if not (inMyGroup(key) and inAshenvale()) then return end
+    if credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT) then
+        logVictory(ts, ("counted (told by %s, in my group)"):format(tostring(key)))
+    end
 end
+
+-- /mw test victory: what became of the last Total Victories Overlord told of.
+ns.tests.victory = { help = "what became of the last Total Victories Overlord reported", fn = function()
+    local log = ns.db and ns.db.victoryLog or {}
+    if #log == 0 then ns.print("no Total Victory reported by Overlord yet (since this was added).") return end
+    for _, v in ipairs(log) do
+        ns.print(("%s: %s"):format(date("%b %d %H:%M", v.ts or v.at or 0), tostring(v.result)))
+    end
+end }
 
 local hooked = false
 local function hookVictory()

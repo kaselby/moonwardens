@@ -921,6 +921,181 @@ do
     ns.db.objectiveCaptures, ns.db.badgeClaimed = keepCaps, keepClaimed
 end
 
+-- Tor ilisar'thera'nal! (Total Victory on Ashenvale), from Overlord's
+-- SetVictoryCooldown (a small Overlord, faked). It counts when I'm in
+-- Ashenvale and I, or (in a group) a member of it, was inside the
+-- capital, Splintertree Post, as it fell; heard of up to 15 min late; once
+-- however many tell it, however often. Tiers by how many in all.
+do
+    local B, C = ns.Badges, ns.Captures
+    local keepCaps, keepGroup, keepMap = ns.db.objectiveCaptures, W.group, W.map
+    ns.db.objectiveCaptures = {}
+    local inZone
+    local st = { id = "ash_splintertree", name = "Splintertree Post", status = "captured", owner = "Horde", capturedTime = 1,
+        center = { 50, 50 }, radius = 5 }
+    local rn = { id = "ash_raynewood", name = "Raynewood Retreat", status = "captured", owner = "Alliance", capturedTime = 1,
+        center = { 20, 20 }, radius = 5 }
+    local O = {
+        PlayerFaction = "Alliance", L = {},
+        Fronts = { activeFrontId = "ashenvale", ResolveFrontByMapID = function() return {} end,
+            GetEnemyCapitalId = function() return "ash_splintertree" end, GetMapID = function() return 1440 end },
+        Zones = { GetCurrentPlayerZone = function() return inZone end, SetVictoryCooldown = function() end,
+            GetMapAspectRatio = function() return 1 end },
+        ZoneDatabase = { rn, st },
+    }
+    _G.Overlord = O
+    W.fire("ADDON_LOADED", "Overlord")                     -- (Moonwardens hooks its victories)
+    W.map = 1440
+    local function victories() local _, n = C.Weeks("victory"); return n end
+    local function lastLog() local l = ns.db.victoryLog or {}; return l[#l] and l[#l].result or "" end
+    local function partySent()
+        local n = 0
+        for _, m in ipairs(W.sent) do if m.m:find("^TV|") and m.ch == "PARTY" then n = n + 1 end end
+        return n
+    end
+    local function tv(from, t) W.fire("CHAT_MSG_ADDON", "MWG1", "TV|1|ashenvale|" .. t, "PARTY", from) end
+    local function fall()                                  -- (Splintertree taken for us, now)
+        local t = time()
+        st.status, st.owner, st.capturedTime = "captured", "Alliance", t
+        return t
+    end
+    local function nextVictory() W.advance(1900, 1) end   -- (the next one: well apart)
+
+    -- 1. In a party, inside Splintertree as it falls, then gone; another
+    -- point re-stamped after it (a guildmate's sync); Overlord hears of the
+    -- victory 3 minutes on, dated by the capital's fall.
+    W.group = { "Thalanor Oakheart", "Caelith Shade" }
+    W.units.party1 = { name = "Thalanor Oakheart" }
+    W.units.party2 = { name = "Caelith Shade" }
+    inZone = st
+    W.advance(3)
+    local ct = fall()
+    W.advance(2)
+    inZone = nil
+    rn.capturedTime = ct + 4
+    W.advance(180)
+    local tv0 = partySent()
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct)
+    W.advance(1)
+    check(victories() == 1, "victory: counted when heard 3 min late, another point stamped after the capital")
+    check(lastLog():find("^counted %(group%), heard %d+ s late"), "victory: logged as counted: " .. lastLog())
+    check(partySent() == tv0 + 1, "victory: told to the party")
+
+    -- 2. The whole party reports it, again and again: Overlord records it
+    -- three more times (its paths, a few seconds apart), each groupmate
+    -- tells it twice with their own stamps. Still one; told once.
+    for _, d in ipairs({ 0, 2, 5 }) do O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct + d) end
+    for _, d in ipairs({ 0, 1, 3, 5 }) do tv("Thalanor-Oakheart", ct + d); tv("Caelith-Shade", ct - d) end
+    W.advance(1)
+    check(victories() == 1, "victory: reported by the whole party, over and over: counted once")
+    check(partySent() == tv0 + 1, "victory: told to the party once, not each time it's heard")
+
+    -- 3. Thalanor inside as it falls, me elsewhere in Ashenvale; heard 1 min late.
+    nextVictory()
+    W.unitPos = { party1 = { 0.5, 0.5 } }
+    W.advance(3)
+    local ct2 = fall()
+    W.advance(3)
+    W.unitPos = nil
+    W.advance(60)
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct2)
+    W.advance(1)
+    check(victories() == 2, "victory: a party member inside as it fell counts it for me (in Ashenvale)")
+
+    -- 4. Thalanor inside a minute before it fell, gone by then: not counted.
+    nextVictory()
+    W.unitPos = { party1 = { 0.5, 0.5 } }
+    W.advance(3)
+    W.unitPos = nil
+    W.advance(60)
+    local ct3 = fall()
+    W.advance(2)
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct3)
+    W.advance(1)
+    check(victories() == 2 and lastLog():find("^not counted: no one in my group"), "victory: inside before, not as it fell: not counted (" .. lastLog() .. ")")
+
+    -- 5. Thalanor inside as it fell, but I'm not in Ashenvale: not counted -
+    -- from Overlord, nor from his word.
+    nextVictory()
+    W.unitPos = { party1 = { 0.5, 0.5 } }
+    W.advance(3)
+    local ct4 = fall()
+    W.advance(2)
+    W.unitPos = nil
+    W.map = 1439
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct4)
+    tv("Thalanor-Oakheart", ct4)
+    W.advance(1)
+    check(victories() == 2 and lastLog():find("^not counted: not in Ashenvale"), "victory: out of Ashenvale: not counted (" .. lastLog() .. ")")
+    W.map = 1440
+
+    -- 6. A groupmate's word alone (Overlord saw nothing here), in Ashenvale: counted.
+    nextVictory()
+    local ct5 = time() - 20
+    tv("Caelith-Shade", ct5)
+    W.advance(1)
+    check(victories() == 3 and lastLog():find("told by", 1, true), "victory: told by a party member, in Ashenvale: counted")
+
+    -- 7. Solo and never inside it: not counted.
+    W.group = {}
+    W.units.party1, W.units.party2 = nil, nil
+    nextVictory()
+    local ct6 = fall()
+    W.advance(2)
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct6)
+    W.advance(1)
+    check(victories() == 3 and lastLog():find("^not counted: not inside Splintertree Post"), "victory: solo, never inside: not counted (" .. lastLog() .. ")")
+    -- (one from long ago, replayed: nothing)
+    nextVictory()
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", time() - 1000)
+    W.advance(1)
+    check(victories() == 3, "victory: an old one replayed doesn't count")
+
+    -- The tiers: 1, 5, 10, 20; copper once at three (no "x3").
+    local mine = B.Mine().badges
+    check(B.Get("tv").tier == "copper" and B.Get("tv2").goal == 5 and B.Get("tv3").goal == 10 and B.Get("tv4").goal == 20
+        and B.Get("tv").track == B.Get("tv4").track, "Tor ilisar'thera'nal!: tiers 1, 5, 10, 20, one track, copper keeps the id tv")
+    check(mine.tv.times == 1 and mine.tv2.times == 0 and mine.tv2.value == 3, "three victories: copper once, silver 3/5")
+    local printed = #W.prints
+    SlashCmdList.MOONWARDENS("test victory")
+    check(table.concat(W.prints, "\n", printed + 1):find("counted (group)", 1, true), "/mw test victory lists them")
+
+    _G.Overlord = nil
+    W.group, W.map = keepGroup, keepMap
+    ns.db.objectiveCaptures = keepCaps
+end
+
+-- An officer's Grant Badge: the badge, the tiers under it, and (for one
+-- counted toward, patrols) its count at the goal - what's added after
+-- counts on top; revoked, all of it goes. (The ledger keeps nothing from
+-- before the fresh start: the server clock is moved past it here.)
+do
+    local B, L = ns.Badges, ns.Ledger
+    local realGST = GetServerTime
+    GetServerTime = function() return B.FRESH_START + 200000 + W.clock end
+    local tha = ns.key("Thalanor-Oakheart")
+    local g = L.Award(tha, "pt2", 0, "grant test")
+    check(g, "officer grants Owl's Vigilance silver")
+    local r = B.Of(tha).badges
+    check(r.pt1.times == 1 and r.pt2.times == 1 and r.pt3.times == 0 and r.pt3.value == 15,
+        "granted silver: copper too, and gold's progress at silver's goal (" .. tostring(r.pt3.value) .. "/30)")
+    W.advance(2)
+    local p = L.Award(tha, "pt1", 1, "one more patrol")
+    r = B.Of(tha).badges
+    check(p and r.pt3.value == 16, "a patrol added after the grant counts on top (" .. tostring(r.pt3.value) .. ")")
+    W.advance(2)
+    local rv = L.Revoke(g.id, "test: a mistake")
+    r = B.Of(tha).badges
+    check(rv and r.pt2.times == 0 and r.pt1.times == 0 and r.pt3.value == 1, "the grant revoked: its count goes with it")
+    -- A track counted by the addon (kills): granting silver gives copper too.
+    local k = L.Award(tha, "lt2", 0, "grant test")
+    r = B.Of(tha).badges
+    check(k and r.lt1.times == 1 and r.lt2.times == 1 and r.lt3.times == 0, "granted kills silver: copper too")
+    -- (the test's events: gone again)
+    for _, e in ipairs({ g, p, rv, k }) do if e then ns.db.ledger[e.id] = nil end end
+    GetServerTime = realGST
+end
+
 -- An offline guildie's badges: no whisper (the game would say "No player
 -- named ..."); what an online one sends is kept for when they're offline
 do

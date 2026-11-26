@@ -174,12 +174,17 @@ local function objectiveSet(cat, series, idW, idL, what, plural, icon, weekly, l
         }
     end
 end
--- Total Victory: every one counts again ("selfcount").
-Badges.LIST[#Badges.LIST + 1] = {
-    id = "tv", cat = "kalimdor", kind = "selfcount", series = "victory", points = 50, goal = 1,
-    name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
-    desc = "Be in the party or raid that takes all of Ashenvale on Overlord.",
-}
+-- Total Victory, in tiers by how many in all ("selflifetime"). The first
+-- keeps the id it had alone ("tv"), so a victory claimed before still counts.
+for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 5, 100 }, { "gold", 10, 200 }, { "moonstone", 20, 400 } }) do
+    Badges.LIST[#Badges.LIST + 1] = {
+        id = i == 1 and "tv" or ("tv" .. i), cat = "kalimdor", kind = "selflifetime", series = "victory",
+        tier = t[1], goal = t[2], points = t[3], unit = "total victories",
+        name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
+        desc = t[2] == 1 and "Be in the party or raid that takes all of Ashenvale on Overlord."
+            or ("Be in the party or raid that takes all of Ashenvale on Overlord %d times."):format(t[2]),
+    }
+end
 -- Holding the line: inside one of Splintertree Post's two approaches
 -- (Overlord's prerequisites for it) as it falls - each time counts again
 -- (Captures.lua, series "support").
@@ -628,6 +633,7 @@ function Badges.Compute(weeks, manual, key)
                 end
             end
             if c and (c.max or 0) > times then times, last = c.max, c.last end
+            if b.kind == "selflifetime" then times = math.min(times, 1) end   -- (reached once: no "x2")
             e.times = times
             e.last = last or (times > 0 and c and c.last) or nil
             e.value = value
@@ -676,6 +682,28 @@ function Badges.Compute(weeks, manual, key)
         e.goal = b.goal
         e.points = b.points * e.times
         score = score + e.points
+    end
+    -- A track that counts up (kills, captures, victories, patrols, all
+    -- time): a tier earned or granted means every tier under it was reached
+    -- - earned too, at their goals. (Weekly and placement tiers each stand
+    -- alone.)
+    local CUMULATIVE = { lifetime = true, selflifetime = true, manual = true }
+    for _, t in pairs(Badges.TRACKS) do
+        local top
+        for i = #t.tiers, 1, -1 do
+            local tb = t.tiers[i]
+            if CUMULATIVE[tb.kind] and out[tb.id].times > 0 then top = i; break end
+        end
+        local hi = top and out[t.tiers[top].id]
+        for i = 1, (top or 1) - 1 do
+            local tb = t.tiers[i]
+            local e = out[tb.id]
+            if CUMULATIVE[tb.kind] and e.times == 0 then
+                e.times, e.last, e.lastAt, e.value = 1, hi.last, hi.lastAt, tb.goal
+                e.points = tb.points
+                score = score + e.points
+            end
+        end
     end
     -- Parents: how many of their children are done; complete when all are.
     for _, b in ipairs(Badges.LIST) do

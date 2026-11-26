@@ -271,6 +271,7 @@ W.raid = false
 W.invites, W.sounds, W.converted, W.accepted, W.popupsHidden = {}, {}, 0, 0, {}
 function GetNumGroupMembers() return #W.group > 0 and #W.group + 1 or 0 end
 function IsInRaid() return W.raid end
+function IsInGroup() return #W.group > 0 end
 local oldUnitName = UnitName
 function UnitName(u)
     local i = u:match("^party(%d)$") or u:match("^raid(%d+)$")
