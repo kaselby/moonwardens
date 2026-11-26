@@ -373,7 +373,11 @@ local function build(f)
     local UI = ns.UI
     LB.page = f
     f.week = 0 -- 0 = this week, 1 = last week
+    -- The heading: where it counts; under it, when it resets. (The Guild
+    -- Total: over the Kills column, below.)
     f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -4)
+    f.reset = UI.Text(f, "small", UI.GREY, "LEFT"); f.reset:SetPoint("TOPLEFT", f.sub, "BOTTOMLEFT", 0, -3)
+    f.reset:SetHeight(14)                 -- (a line's height even when empty: the Guild Total sits on it)
 
     f.tabs = {}
     for i, label in ipairs({ "This week", "Last week" }) do
@@ -385,11 +389,18 @@ local function build(f)
         f.tabs[i] = b
     end
 
-    local y = -28
+    local y = -40                         -- (under the heading's two lines)
     local function col(text, x, w, justify)
         local h = UI.Text(f, nil, UI.GOLD, justify); h:SetPoint("TOPLEFT", x, y); h:SetWidth(w); h:SetText(text)
+        return h
     end
-    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT"); col("Kills", 440, 60, "RIGHT")
+    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT")
+    local kills = col("Kills", 440, 60, "RIGHT")
+    -- The Guild Total: on the Resets line, centred over the Kills heading
+    -- (on the word, at its box's right end - not the box). Placed as it's
+    -- filled in, by its width (refresh).
+    f.total = UI.Text(f, "small", UI.GREY, "LEFT")
+    f.killsMid = 440 + 60 - (ns.try(kills.GetStringWidth, kills) or 0) / 2
     local line = f:CreateTexture(nil, "ARTWORK"); line:SetColorTexture(0.35, 0.28, 0.08, 1)
     line:SetPoint("TOPLEFT", 0, y - 16); line:SetSize(508, 1)
 
@@ -488,11 +499,16 @@ local function refresh(f)
     for _, r in ipairs(rows) do total = total + r.c end
     local resetAt = LB.NextReset()
     local left = resetAt - (ns.try(GetServerTime) or time())
+    f.total:SetText(("Guild Total |cffffd100%s|r"):format(total))
+    local tw = ns.try(f.total.GetStringWidth, f.total) or 0
+    f.total:ClearAllPoints()
+    f.total:SetPoint("LEFT", f.reset, "LEFT", math.floor(f.killsMid - tw / 2 + 0.5), 0)
     if f.week == 0 then
-        f.sub:SetText(("Ashenvale, Mount Hyjal and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
-            duration(left), total))
+        f.sub:SetText("Ashenvale, Mount Hyjal and Stonetalon Peak")
+        f.reset:SetText(("Resets Tuesday  -  %s left"):format(duration(left)))
     else
-        f.sub:SetText(("Final standings  -  guild total |cffffd100%d|r"):format(total))
+        f.sub:SetText("Final standings")
+        f.reset:SetText("")
     end
     for i, r in ipairs(f.rows) do
         local e = rows[i + f.offset]
@@ -540,7 +556,8 @@ end
 
 ns.UI.AddPage(5, "Leaderboard", build, refresh,
     { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard", title = "Ashenvale Leaderboard",
-      bgAtlas = "Legacy-Rewards-Tracker-background" })   -- (the minimap button's)
+      bgAtlas = "Legacy-Rewards-Tracker-background",   -- (the minimap button's)
+      button = "invite" })                              -- (the game's Invite Member, bottom right)
 
 ---------------------------------------------------------------------------
 -- Startup

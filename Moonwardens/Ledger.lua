@@ -50,7 +50,7 @@ Ledger.IsAdmin = isAdmin
 function Ledger.TestAllowed()
     local key = ns.meKey
     if not key then return false end
-    if TESTERS[key] then return true end
+    if TESTERS[key] or (ns.IsDev and ns.IsDev(key)) then return true end
     if IsGuildLeader and IsGuildLeader() then return true end
     return ns.Roster and ns.Roster.IsOfficer(key) and true or false
 end
@@ -544,7 +544,7 @@ local function newest()
     return t
 end
 
-ns.tests.badges = { usage = "on | off | clear", help = "badge test mode: awards stay on this client (officers and testers)", fn = function(rest)
+ns.tests.badges = { allowed = function() return Ledger.TestAllowed() end, usage = "on | off | clear", help = "badge test mode: awards stay on this client (officers and testers)", fn = function(rest)
     local arg = (rest or ""):lower():match("%S+") or ""
     if not Ledger.TestAllowed() then
         ns.print("Test mode is for officers, the guild leader and named testers.")

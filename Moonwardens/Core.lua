@@ -179,7 +179,25 @@ end)
 
 ---------------------------------------------------------------------------
 -- Slash command: modules add verbs with ns.slash[verb] = { fn, help }.
+-- `dev = true`: a tool for testing the addon, for its makers only (ns.DEVS);
+-- `allowed()`: only for those it says (officers...). Anyone else never sees
+-- it in the lists, and typing it just lists the commands.
 ---------------------------------------------------------------------------
+ns.DEVS = { ["shandor moonfang"] = true, ["kaelith nightbough"] = true }   -- (Shandor; Krylea)
+function ns.IsDev(key)
+    key = key or ns.meKey
+    return key ~= nil and ns.DEVS[key] == true
+end
+local function usable(c)
+    if c.dev and not ns.IsDev() then return false end
+    if c.allowed then
+        local ok, yes = pcall(c.allowed)
+        if not (ok and yes) then return false end
+    end
+    return true
+end
+ns.SlashUsable = usable
+
 ns.slash = {}
 SLASH_MOONWARDENS1 = "/mw"
 SLASH_MOONWARDENS2 = "/moonwardens"
@@ -187,28 +205,29 @@ SlashCmdList.MOONWARDENS = function(msg)
     local verb, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     verb = verb:lower()
     local c = ns.slash[verb]
-    if c then return c.fn(rest) end
+    if c and usable(c) then return c.fn(rest) end
     if verb == "" and ns.ToggleWindow then return ns.ToggleWindow() end
     ns.print("v" .. ns.VERSION .. " commands:")
     local verbs = {}
-    for v in pairs(ns.slash) do verbs[#verbs + 1] = v end
+    for v, cc in pairs(ns.slash) do if usable(cc) then verbs[#verbs + 1] = v end end
     table.sort(verbs)
     for _, v in ipairs(verbs) do ns.print("  /mw " .. v .. " - " .. ns.slash[v].help) end
 end
 
 ---------------------------------------------------------------------------
 -- /mw test: things to try out in game, each its own word ("/mw test
--- badges on"). Modules add them with ns.tests[name] = { usage, help, fn };
--- "/mw test" alone lists them.
+-- badges on"). Modules add them with ns.tests[name] = { usage, help, fn },
+-- `dev` and `allowed` as for commands; "/mw test" alone lists the ones
+-- I may use.
 ---------------------------------------------------------------------------
 ns.tests = {}
 ns.slash.test = { help = "things to try out in game (/mw test for the list)", fn = function(rest)
     local name, arg = (rest or ""):match("^%s*(%S*)%s*(.-)%s*$")
     local t = ns.tests[name:lower()]
-    if t then return t.fn(arg) end
+    if t and usable(t) then return t.fn(arg) end
     ns.print("things to test in game:")
     local names = {}
-    for n in pairs(ns.tests) do names[#names + 1] = n end
+    for n, tt in pairs(ns.tests) do if usable(tt) then names[#names + 1] = n end end
     table.sort(names)
     for _, n in ipairs(names) do
         local u = ns.tests[n].usage

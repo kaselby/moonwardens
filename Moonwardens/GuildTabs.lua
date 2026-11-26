@@ -60,23 +60,66 @@ local function titleFor(guild, info)
     return (info and info.name ~= "" and info.name) or "Moonwardens"
 end
 
--- The game's View Log button (its Guild Info page's) under our pages: hidden
--- while one of ours shows, back when its page does. (Kept here, not on it.)
-local logHooked = false
-local function viewLog(ours)
-    local b = CommunitiesFrame and CommunitiesFrame.GuildLogButton
-    if not b then return end
-    if not logHooked then
-        logHooked = true
-        b:HookScript("OnShow", function(self) if current and overlay and overlay:IsShown() then self:Hide() end end)
+-- The game's buttons along the window's bottom right, which it shows by its
+-- page (its "display mode": Chat's Invite Member and Guild Recruitment,
+-- Roster's Guild Control, Guild Info's View Log). Our pages sit over the
+-- game's last page, whose buttons would show under them - so, under ours,
+-- only what the page asks for (`button` in its guild opts: "invite", the
+-- Invite Member button), the rest hidden, and kept so as the game shows
+-- them again. Back on a page of the game's: as its mode has them.
+-- (Only shown and hidden - nothing of the game's is called or changed.)
+local BOTTOM = { "GuildLogButton", "InviteButton", "CommunitiesControlFrame", "AddToChatButton" }
+local ASKED = { invite = "InviteButton" }
+local hidByUs = {}           -- button -> true: we hid it while the game had it up
+local bottomHooked = {}
+
+local function oursUp() return current ~= nil and overlay ~= nil and overlay:IsShown() end
+local function wanted(name)
+    local p = current and ns.UI.pages[current]
+    return p and p.guild and ASKED[p.guild.button or ""] == name or false
+end
+
+local function bottomButtons(ours)
+    local cf = CommunitiesFrame
+    if not cf then return end
+    for _, name in ipairs(BOTTOM) do
+        local b = cf[name]
+        if b and not bottomHooked[b] then
+            bottomHooked[b] = true
+            b:HookScript("OnShow", function(self)
+                if oursUp() and not wanted(name) then hidByUs[self] = true; self:Hide() end
+            end)
+            b:HookScript("OnHide", function(self)
+                if oursUp() and wanted(name) and cf:IsShown() then self:Show() end
+            end)
+        end
     end
     if ours then
-        b:Hide()
-    else
-        local cf = CommunitiesFrame
-        local okM, mode = pcall(function() return cf.GetDisplayMode and cf:GetDisplayMode() end)
-        if okM and COMMUNITIES_FRAME_DISPLAY_MODES and mode == COMMUNITIES_FRAME_DISPLAY_MODES.GUILD_INFO then b:Show() end
+        for _, name in ipairs(BOTTOM) do
+            local b = cf[name]
+            if b then
+                if wanted(name) then b:Show()
+                elseif b:IsShown() then hidByUs[b] = true; b:Hide() end
+            end
+        end
+        return
     end
+    -- The game's page again: its mode's buttons up, the rest down. (Add to
+    -- Chat is in no mode's list - the game shows it for some channels - so
+    -- it's only put back if we hid it, never hidden here.)
+    local okM, mode = pcall(function() return cf.GetDisplayMode and cf:GetDisplayMode() end)
+    local inMode = {}
+    if okM and type(mode) == "table" then for _, n in ipairs(mode) do inMode[n] = true end end
+    for _, name in ipairs(BOTTOM) do
+        local b = cf[name]
+        if b then
+            if name == "AddToChatButton" then
+                if hidByUs[b] then b:Show() end
+            elseif inMode[name] then b:Show()
+            else b:Hide() end
+        end
+    end
+    wipe(hidByUs)
 end
 
 -- The guild's title, centred on the whole window. (The game's sits between
@@ -175,7 +218,7 @@ function GT.Deselect()
     if overlay then overlay:Hide() end
     for _, t in ipairs(tabs) do t:SetChecked(false) end
     if was and CommunitiesFrame then
-        viewLog(false)
+        bottomButtons(false)
         guildLook(GT.GuildPicked())          -- (the title: the game's page again)
     end
 end
@@ -530,7 +573,7 @@ function GT.Select(index)
     overlay:Show()
     for _, t in ipairs(tabs) do t:SetChecked(t.index == index) end
     uncheckGameTabs()
-    viewLog(true)
+    bottomButtons(true)
     guildLook(GT.GuildPicked())              -- (the title: this page's)
     local eb = CommunitiesFrame.ChatEditBox
     if eb and eb.HasFocus and eb:HasFocus() then eb:ClearFocus() end

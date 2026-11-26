@@ -533,7 +533,7 @@ local function addIdLine(tt, text)
 end
 
 local function onUnitTooltip(tt)
-    if not (ns.db and ns.db.debugIds) or not tt.GetUnit then return end
+    if not (ns.db and ns.db.debugIds and ns.IsDev()) or not tt.GetUnit then return end   -- (left on by another: off)
     local ok, _, unit = pcall(tt.GetUnit, tt)
     if not ok then return end
     local _, server = npcGuid(unit)
@@ -548,13 +548,13 @@ ns.onLogin(function()
         GameTooltip:HookScript("OnTooltipSetUnit", ns.guard(onUnitTooltip, "debug ids"))
     end
     ns:On("PLAYER_TARGET_CHANGED", function()
-        if not (ns.db and ns.db.debugIds) then return end
+        if not (ns.db and ns.db.debugIds and ns.IsDev()) then return end
         local g = npcGuid("target")
         if g then ns.print("target " .. (ns.try(UnitName, "target") or "?") .. ": " .. g) end
     end)
 end, "debug ids")
 
-ns.slash.debug = { help = "on | off - NPC IDs on their tooltips (and target GUIDs in chat)", fn = function(arg)
+ns.slash.debug = { dev = true, help = "on | off - NPC IDs on their tooltips (and target GUIDs in chat)", fn = function(arg)
     arg = (arg or ""):lower()
     local on
     if arg == "on" then on = true elseif arg == "off" then on = false else on = not ns.db.debugIds end

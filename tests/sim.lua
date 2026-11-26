@@ -72,6 +72,25 @@ check(MoonwardensFrame and MoonwardensFrame:IsShown(), "window opens")
 ns.ToggleWindow(9)
 check(MoonwardensFrame.current == 9, "settings page")
 W.missingTemplates = { PortraitFrameTemplate = true }
+-- The makers' tools (dev): not for me (an officer, not one of them) -
+-- hidden from the lists and refused; officers' ones there. Then I'm one.
+do
+    local from = #W.prints
+    SlashCmdList.MOONWARDENS("help")
+    SlashCmdList.MOONWARDENS("test")
+    local shown = table.concat(W.prints, "\n", from + 1)
+    check(not shown:find("/mw debug", 1, true) and not shown:find("/mw comm", 1, true)
+        and not shown:find("mapdots", 1, true) and not shown:find("newdots", 1, true) and not shown:find("test fill", 1, true)
+        and shown:find("/mw hk", 1, true) and shown:find("test victory", 1, true) and shown:find("test badgepoints", 1, true),
+        "the makers' tools hidden from the lists; the rest there:\n" .. shown)
+    from = #W.prints
+    SlashCmdList.MOONWARDENS("comm")
+    check(not W.prints[#W.prints]:find("sent %d") and W.prints[from + 1]:find("commands:", 1, true), "/mw comm refused (just the list)")
+    SlashCmdList.MOONWARDENS("test mapdots on")
+    check(W.prints[#W.prints] and not W.prints[#W.prints]:find("placed", 1, true), "/mw test mapdots refused")
+    check(not ns.IsDev() and ns.IsDev("shandor moonfang") and ns.IsDev("kaelith nightbough"), "the makers: Shandor and Kaelith")
+    ns.DEVS[ns.meKey] = true
+end
 SlashCmdList.MOONWARDENS("comm")
 check(W.prints[#W.prints]:find("sent"), "slash comm")
 MoonwardensMinimapButton._scripts.OnEnter(MoonwardensMinimapButton)
@@ -605,10 +624,12 @@ check(pg.rows[1].name:GetText() == "Thalanor Oakheart" and pg.rows[1].n:GetText(
 local mine
 for _, r in ipairs(pg.rows) do if r:IsShown() and r.name:GetText():find("(you)", 1, true) then mine = r end end
 check(mine and mine.hl:IsShown(), "my row highlighted")
-check(pg.sub:GetText():find("guild total |cffffd100" .. (50 + 12 + 5 + 5) .. "|r", 1, true) and pg.sub:GetText():find("left", 1, true), "subtitle: " .. pg.sub:GetText())
+check(pg.total:GetText() == "Guild Total |cffffd100" .. (50 + 12 + 5 + 5) .. "|r" and pg.sub:GetText():find("Mount Hyjal", 1, true)
+    and pg.reset:GetText():find("^Resets Tuesday  %-  .+ left$"), "heading: " .. pg.sub:GetText() .. " / " .. pg.reset:GetText() .. " / " .. pg.total:GetText())
 check(pg.foot:GetText():find("Thalanor Oakheart|r (241)", 1, true), "last week's winner in the footer: " .. pg.foot:GetText())
 pg.tabs[2]._scripts.OnClick(pg.tabs[2])
-check(pg.sub:GetText():find("Final standings", 1, true) and pg.rows[1].n:GetText() == 241 and not pg.rows[2]:IsShown(), "last week view")
+check(pg.sub:GetText():find("Final standings", 1, true) and pg.reset:GetText() == "" and pg.total:GetText():find("^Guild Total ")
+    and pg.rows[1].n:GetText() == 241 and not pg.rows[2]:IsShown(), "last week view")
 pg.tabs[1]._scripts.OnClick(pg.tabs[1])
 SlashCmdList.MOONWARDENS("hk")
 check(W.prints[#W.prints]:find("5 Horde kills", 1, true), "/mw hk")

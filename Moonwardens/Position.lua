@@ -460,7 +460,7 @@ local function clearTestDots()
     for key in pairs(testDots or {}) do guildies[key] = nil end
     testDots = nil
 end
-ns.tests.mapdots = { usage = "on | off", help = "three test guildie dots around you on the maps", fn = function(arg)
+ns.tests.mapdots = { dev = true, usage = "on | off", help = "three test guildie dots around you on the maps", fn = function(arg)
     arg = (arg or ""):lower()
     if arg == "off" then
         local had = testDots ~= nil
