@@ -702,7 +702,29 @@ ns.OfficerUI.Toggle()
 check(not MoonwardensBadgeManagement:IsShown(), "and closes")
 ns.OfficerUI.Open("thalanor oakheart")
 check(MoonwardensBadgeManagement:IsShown(), "Award Badge Progress opens it too")
-MoonwardensBadgeManagement:Hide()
+-- Its Guildie field is the Badge Inspector's (ns.GuildiePicker): the same
+-- name shown, the same suggestions, Enter takes the first of them.
+do
+    local function drive(p, label)
+        p.box:SetText("cae")
+        p.box._scripts.OnTextChanged(p.box, true)
+        local first = p.picks.rows[1]
+        check(p.picks:IsShown() and first:IsShown() and first.key == "caelith shade"
+            and tostring(first.text:GetText()):find("Caelith Shade", 1, true), label .. ": suggestions while typing")
+        p.box._scripts.OnEnterPressed(p.box)
+        W.advance(0.3)
+        return p.box:GetText()
+    end
+    local op = ns.OfficerUI.Picker()
+    check(op and op.box:GetText() == "Thalanor Oakheart" and op.arrow, "Badge Management: the guildie opened for, in the field, with the list beside it")
+    check(drive(op, "Badge Management") == "Caelith Shade", "Badge Management: Enter picks the first suggestion")
+    MoonwardensBadgeManagement:Hide()
+    ns.BadgeChest.Open("thalanor oakheart")
+    local cp = ns.BadgeChest.Picker()
+    check(cp and cp.box:GetText() == "Thalanor Oakheart", "Badge Inspector: the same field")
+    check(drive(cp, "Badge Inspector") == "Caelith Shade", "Badge Inspector: Enter picks the first suggestion")
+    MoonwardensBadgeChest:Hide()
+end
 
 -- Badge points: hidden, until an officer shows them (/mw test badgepoints)
 check(not ns.BadgesUI.ShowPoints(), "badge points hidden")

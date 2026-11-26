@@ -103,18 +103,15 @@ local function build()
     f.mine:SetPoint("RIGHT", f, "TOPRIGHT", -12, ROW_Y)
     f.mine:SetText("My Badges")
     f.mine:SetScript("OnClick", function() Chest.Open(ns.meKey) end)
-    -- Their name: a field to type another's in, and the guild's list.
-    f.name = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.name:SetHeight(26)
-    f.name:SetAutoFocus(false)
-    f.name:SetFontObject(GameFontNormalLarge)
+    -- Their name: a field to type another's in, and the guild's list
+    -- (ns.GuildiePicker, below - Badge Management's Guildie is the same).
+    f.picker = ns.GuildiePicker(f, {
+        current = function() return who end,
+        onPick = function(key) Chest.Open(key) end,
+        onBlur = function() Chest.Refresh() end,
+    })
+    f.name, f.arrow = f.picker.box, f.picker.arrow
     f.name:SetPoint("LEFT", f.who, "RIGHT", 12, 0)
-    f.arrow = CreateFrame("Button", nil, f)
-    f.arrow:SetSize(24, 24)
-    f.arrow:SetPoint("LEFT", f.name, "RIGHT", 2, 0)
-    f.arrow:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-    f.arrow:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Down")
-    f.arrow:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
     local okDD, dd = pcall(CreateFrame, "DropdownButton", nil, f, "WowStyle1DropdownTemplate")
     if okDD and dd and dd.SetupMenu then
         dd:SetWidth(170)
@@ -136,7 +133,6 @@ local function build()
         f.sort = dd
     end
     f.name:SetPoint("RIGHT", f.mine, "LEFT", -34, 0)
-    Chest.BuildPicker()
 
     -- The chest: the Badges tab's ground (dark, the game's rock, the Legacy art).
     local inset = CreateFrame("Frame", nil, f)
@@ -195,48 +191,82 @@ local function resolve(t)
     return matching(t, 1)[1]
 end
 
-function Chest.BuildPicker()
-    local box = f.name
-    f.picks = CreateFrame("Frame", nil, f)
-    f.picks:SetPoint("TOPLEFT", box, "BOTTOMLEFT", -6, -2)
-    f.picks:SetSize(240, PICKS * 18 + 6)
-    f.picks:SetFrameLevel(f:GetFrameLevel() + 50)
-    local bg = f.picks:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.92)
-    f.picks.rows = {}
+-- A guildie field: type a name (first names first, then last and RP
+-- names) and pick one of the suggestions under it, or pick one from the
+-- guild's list beside it (the arrow), A-Z. Enter takes the name typed, else
+-- the first suggestion; leaving it puts back whoever is picked. Not being
+-- typed in, it shows them in their RP name and colour (the Roleplay
+-- settings, totalRP3), else the game's and their class's.
+-- The Badge Inspector's "Inspected Moonwarden:" and Badge Management's
+-- Guildie (OfficerUI.lua) are both this.
+-- opts: current() -> the key picked now; onPick(key); onBlur() (after
+-- leaving it); width, font (GameFontNormalLarge), height (26).
+-- Returns { box, arrow, picks, SetKey(key) }: SetKey draws `key` in it
+-- (nil: empty) unless it's being typed in.
+function ns.GuildiePicker(parent, opts)
+    opts = opts or {}
+    local p = {}
+    local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    box:SetHeight(opts.height or 26)
+    if opts.width then box:SetWidth(opts.width) end
+    box:SetAutoFocus(false)
+    box:SetFontObject(opts.font or GameFontNormalLarge)
+    local arrow = CreateFrame("Button", nil, parent)
+    arrow:SetSize(24, 24)
+    arrow:SetPoint("LEFT", box, "RIGHT", 2, 0)
+    arrow:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+    arrow:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Down")
+    arrow:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    p.box, p.arrow = box, arrow
+
+    local function pick(key)
+        if key and opts.onPick then opts.onPick(key) end
+    end
+    local picks = CreateFrame("Frame", nil, parent)
+    picks:SetPoint("TOPLEFT", box, "BOTTOMLEFT", -6, -2)
+    picks:SetSize(240, PICKS * 18 + 6)
+    picks:SetFrameLevel(parent:GetFrameLevel() + 50)
+    local bg = picks:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.92)
+    picks.rows = {}
     for i = 1, PICKS do
-        local b = CreateFrame("Button", nil, f.picks)
+        local b = CreateFrame("Button", nil, picks)
         b:SetSize(234, 18)
         b:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 18)
         local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetColorTexture(1, 0.82, 0, 0.18)
         b.text = K.text(b, "GameFontHighlight"); b.text:SetPoint("LEFT", 6, 0)
-        b:SetScript("OnClick", function(self) box:ClearFocus(); Chest.Open(self.key) end)
-        f.picks.rows[i] = b
+        b:SetScript("OnClick", function(self) box:ClearFocus(); pick(self.key) end)
+        picks.rows[i] = b
     end
-    f.picks:Hide()
+    picks:Hide()
+    p.picks = picks
     local function show(q)
         local list = matching(q, PICKS)
-        for i, b in ipairs(f.picks.rows) do
+        for i, b in ipairs(picks.rows) do
             local key = list[i]
             b.key = key
             if key then b.text:SetText(coloured(key)); b:Show() else b:Hide() end
         end
-        f.picks:SetHeight(math.max(1, #list) * 18 + 6)
-        f.picks:SetShown(#list > 0)
+        picks:SetHeight(math.max(1, #list) * 18 + 6)
+        picks:SetShown(#list > 0)
     end
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     box:SetScript("OnTextChanged", function(self, user) if user then show(self:GetText()) end end)
     box:SetScript("OnEnterPressed", function(self)
         local key = resolve(self:GetText())
         self:ClearFocus()
-        if key then Chest.Open(key) end
+        pick(key)
     end)
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     box:SetScript("OnEditFocusLost", function()
         -- (a moment, so a click on a suggestion lands first; then theirs again)
-        C_Timer.After(0.2, function() f.picks:Hide(); Chest.Refresh() end)
+        C_Timer.After(0.2, function()
+            picks:Hide()
+            p.SetKey(opts.current and opts.current())
+            if opts.onBlur then opts.onBlur() end
+        end)
     end)
     -- The guild's list, A-Z, beside it.
-    f.arrow:SetScript("OnClick", function(self)
+    arrow:SetScript("OnClick", function(self)
         if not (MenuUtil and MenuUtil.CreateContextMenu) then box:SetFocus(); return end
         local keys = {}
         for key in pairs(ns.Roster.All()) do keys[#keys + 1] = key end
@@ -244,10 +274,26 @@ function Chest.BuildPicker()
         MenuUtil.CreateContextMenu(self, function(_, root)
             if root.SetScrollMode then pcall(root.SetScrollMode, root, 360) end
             for _, key in ipairs(keys) do
-                root:CreateRadio(coloured(key), function(k) return k == who end, function(k) Chest.Open(k) end, key)
+                root:CreateRadio(coloured(key), function(k) return k == (opts.current and opts.current()) end,
+                    function(k) pick(k) end, key)
             end
         end)
     end)
+
+    -- Their name and colour: the RP ones when the Roleplay settings are on
+    -- and they have them (totalRP3), else the game's and their class's.
+    function p.SetKey(key)
+        if box:HasFocus() then return end
+        if not key then box:SetText(""); return end
+        local m = ns.Roster.Get(key)
+        local r, g, b
+        if ns.RP then r, g, b = ns.RP.Color(key) end
+        if not r then r, g, b = ns.classColor(m and m.classFile) end
+        box:SetText((ns.RP and ns.RP.Name(key)) or (m and m.name) or K.nameOf(key))
+        box:SetCursorPosition(0)
+        box:SetTextColor(r or 1, g or 0.82, b or 0)
+    end
+    return p
 end
 
 local function refresh()
@@ -255,17 +301,7 @@ local function refresh()
     local mine = who == ns.meKey
     local result = mine and Badges.Mine() or Badges.Of(who)
 
-    -- Their name and colour: the RP ones when the Roleplay settings are on
-    -- and they have them (totalRP3), else the game's and their class's.
-    local m = ns.Roster.Get(who)
-    local r, g, b
-    if ns.RP then r, g, b = ns.RP.Color(who) end
-    if not r then r, g, b = ns.classColor(m and m.classFile) end
-    if not f.name:HasFocus() then
-        f.name:SetText((ns.RP and ns.RP.Name(who)) or (m and m.name) or K.nameOf(who))
-        f.name:SetCursorPosition(0)
-    end
-    f.name:SetTextColor(r or 1, g or 0.82, b or 0)
+    f.picker.SetKey(who)
     f.mine:SetEnabled(not mine)
     if f.sort then
         if f.sort.GenerateMenu then pcall(f.sort.GenerateMenu, f.sort) end
@@ -280,6 +316,7 @@ local function refresh()
 end
 
 function Chest.Refresh() refresh() end
+function Chest.Picker() return f and f.picker end   -- (tests)
 
 -- Open a guildie's chest (nil: mine). Open already: it shows them instead.
 function Chest.Open(key)

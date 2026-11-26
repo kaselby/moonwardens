@@ -193,39 +193,19 @@ local function buildAward(f, parent, w)
     end
     local X = 110
 
-    -- Guildie: type a name; matches show under it to click.
+    -- Guildie: the Badge Inspector's own field (ns.GuildiePicker,
+    -- BadgeChest.lua) - type a name and pick a suggestion, or pick from the
+    -- guild's list beside it; Enter takes the name typed, else the first
+    -- suggestion; shown in their RP name and colour.
     label("Guildie", -56)
-    a.name = input(a, 200)
-    a.name:SetPoint("TOPLEFT", X + 6, -52)
-    a.nameState = K.text(a, "GameFontHighlight")
-    a.nameState:SetPoint("LEFT", a.name, "RIGHT", 10, 0)
-    a.picks = {}
-    for i = 1, 5 do
-        local b = CreateFrame("Button", nil, a)
-        b:SetSize(200, 16)
-        b:SetPoint("TOPLEFT", a.name, "BOTTOMLEFT", -4, -2 - (i - 1) * 16)
-        b.hl = b:CreateTexture(nil, "HIGHLIGHT"); b.hl:SetAllPoints(); b.hl:SetColorTexture(1, 0.82, 0, 0.15)
-        b.text = K.text(b, "GameFontHighlightSmall"); b.text:SetPoint("LEFT", 4, 0)
-        b:SetFrameLevel(a:GetFrameLevel() + 20)
-        b.bg = b:CreateTexture(nil, "BACKGROUND"); b.bg:SetAllPoints(); b.bg:SetColorTexture(0, 0, 0, 0.85)
-        b:SetScript("OnClick", function(self)
-            state.who = self.key
-            a.name:SetText(K.nameOf(self.key))
-            a.name:ClearFocus()
-            OUI.Refresh()
-        end)
-        b:Hide()
-        a.picks[i] = b
-    end
-    a.name:SetScript("OnTextChanged", function(self, user)
-        if not user then return end
-        local t = self:GetText() or ""
-        local exact = ns.key(t)
-        state.who = (exact and ns.Roster.Get(exact)) and exact or nil
-        a.typed = t
-        OUI.Refresh()
-    end)
-    a.name:SetScript("OnEditFocusLost", function() C_Timer.After(0.2, function() a.typed = nil; OUI.Refresh() end) end)
+    a.picker = ns.GuildiePicker(a, {
+        width = 220,
+        current = function() return state.who end,
+        onPick = function(key) state.who = key; a.picker.SetKey(key); OUI.Refresh() end,
+        onBlur = function() OUI.Refresh() end,
+    })
+    a.name = a.picker.box
+    a.name:SetPoint("LEFT", a, "TOPLEFT", X + 6, -61)
 
     -- What to award, in three steps: a section (category > subsection), a
     -- badge in it (a tier track is one), and - a track's - its tier, by
@@ -413,20 +393,8 @@ local function fillAward(f)
         a.testing:SetText("Every award is logged with your name, in the Audit Log.")
     end
 
-    -- Name field: state, and matches while typing.
-    if state.who then
-        a.nameState:SetText(who(state.who))
-        if not a.name:HasFocus() and (a.name:GetText() or "") == "" then a.name:SetText(K.nameOf(state.who)) end
-    elseif (a.name:GetText() or "") ~= "" then
-        a.nameState:SetText("|cff9d9d9dNo guildie by that name|r")
-    else
-        a.nameState:SetText("")
-    end
-    local list = (a.typed and not state.who) and matches(a.typed, #a.picks) or {}
-    for i, b in ipairs(a.picks) do
-        local key = list[i]
-        if key then b.key = key; b.text:SetText(who(key)); b:Show() else b:Hide() end
-    end
+    -- The guildie picked (the field draws them, unless it's being typed in).
+    a.picker.SetKey(state.who)
 
     local b = state.badge and Badges.Get(state.badge)
     -- The three dropdowns: what's picked, and the tier only for a track.
@@ -795,6 +763,8 @@ local function refresh(f)
     f.scroll:Sync()
 end
 
+function OUI.Picker() return page and page.award and page.award.picker end   -- (tests)
+
 function OUI.Refresh()
     if page and page:IsVisible() then refresh(page) end
 end
@@ -891,7 +861,7 @@ function OUI.Open(key)
     if ns.db then ns.db.officerUI = ns.db.officerUI or {}; ns.db.officerUI.view = "award" end
     state.who = key
     buildWindow()
-    if page and page.award then page.award.name:SetText(key and K.nameOf(key) or "") end
+    if page and page.award then page.award.picker.SetKey(key) end
     win:Show(); win:Raise()
     OUI.Refresh()
 end
