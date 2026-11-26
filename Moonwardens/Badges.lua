@@ -111,15 +111,15 @@ local LIFETIME_ICON = { "inv_ability_eluneschosendruid_boundlessmoonlight", "Spe
 -- fh Failed Hunt, bk1-4 Bankai! (Shobek'Aran: Elune's Reach counts it).
 -- What was earned of them no longer counts.)
 Badges.LIST = {
-    { id = "lt1", cat = "kalimdor", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
+    { id = "lt1", cat = "kalimdor", kind = "lifetime", tier = "copper", goal = 1000, points = 50,
+      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
+      desc = "Kill or assist in killing 1,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
+    { id = "lt2", cat = "kalimdor", kind = "lifetime", tier = "silver", goal = 5000, points = 100,
+      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
+      desc = "Kill or assist in killing 5,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
+    { id = "lt3", cat = "kalimdor", kind = "lifetime", tier = "gold", goal = 10000, points = 250,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
       desc = "Kill or assist in killing 10,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
-    { id = "lt2", cat = "kalimdor", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
-      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 25,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
-    { id = "lt3", cat = "kalimdor", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
-      name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 50,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
 }
 -- Patrols: no client can count these. Guildies report a patrol (the card's
 -- Report a Patrol), officers approve it in the Officers tab (or award it
@@ -186,37 +186,43 @@ for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 5, 100 }, { "gold", 10, 20
     }
 end
 -- Holding the line: inside one of Splintertree Post's two approaches
--- (Overlord's prerequisites for it) as it falls - each time counts again
--- (Captures.lua, series "support").
-Badges.LIST[#Badges.LIST + 1] = {
-    id = "dp", cat = "kalimdor", kind = "selfcount", series = "support", points = 25, goal = 1,
-    name = "I'm Doing My Part!", icon = { "ability_warrior_rallyingcry", "INV_BannerPVP_02" },
-    desc = "Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured.",
-}
+-- (Overlord's prerequisites for it) as it falls (Captures.lua, series
+-- "support"), in tiers by how many times in all ("selflifetime"). The
+-- first keeps the id it had alone ("dp"), so one counted before still does.
+for i, t in ipairs({ { "copper", 1, 25 }, { "silver", 3, 50 }, { "gold", 6, 100 }, { "moonstone", 10, 200 } }) do
+    Badges.LIST[#Badges.LIST + 1] = {
+        id = i == 1 and "dp" or ("dp" .. i), cat = "kalimdor", kind = "selflifetime", series = "support",
+        tier = t[1], goal = t[2], points = t[3], unit = "Splintertree Post captures held",
+        name = "I'm Doing My Part!", icon = { "ability_warrior_rallyingcry", "INV_BannerPVP_02" },
+        desc = t[2] == 1 and "Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured."
+            or ("Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured, %d times."):format(t[2]),
+    }
+end
 -- Kalimdor Defense: the Ashenvale front's capture points (no other
 -- front's).
 objectiveSet("kalimdor", "captures", "ow", "ol", { nil, "Protect Our Sacred Groves" }, "Ashenvale capture points",
     { "spell_nature_protectionformnature", "Achievement_BG_winWSG" },
     {},
-    { { "copper", 100, 25 }, { "silver", 400, 50 }, { "gold", 1000, 100 }, { "moonstone", 2500, 250 } },
+    { { "copper", 20, 25 }, { "silver", 50, 50 }, { "gold", 100, 100 }, { "moonstone", 500, 250 } },
     nil,
     function(n) return ("Be inside %d Ashenvale capture points when they are captured."):format(n) end)
 -- Overlord: Kalimdor's guild outposts and forts (guild keeps) only (which
 -- ones: Captures.REGION; Shobek'Aran among them).
--- (Their counts: about double the first ones at the low tiers, a third
--- more at the high.)
 objectiveSet("kalimdor", "outposts", "uw", "ul", { nil, "Elune's Reach" }, "guild outposts",
     { "spell_holy_elunesgrace", "Spell_Nature_StarFall" },
     {},
-    { { "copper", 20, 35 }, { "silver", 60, 75 }, { "gold", 100, 150 }, { "moonstone", 195, 300 } },
+    { { "copper", 3, 35 }, { "silver", 10, 75 }, { "gold", 25, 150 }, { "moonstone", 100, 300 } },
     nil,
     function(n) return ("Be inside %d of Kalimdor's Outposts as they're captured."):format(n) end)
 objectiveSet("kalimdor", "forts", "fw", "fl", { nil, "Ancient of War" }, "forts",
     { "inv_misc_tournaments_symbol_nightelf", "INV_Misc_Tournaments_banner_Nightelf" },
     {},
-    { { "copper", 10, 50 }, { "silver", 30, 100 }, { "gold", 55, 200 }, { "moonstone", 105, 400 } },
+    { { "copper", 1, 50 }, { "silver", 5, 100 }, { "gold", 10, 200 }, { "moonstone", 25, 400 } },
     nil,
-    function(n) return ("Be inside %d of Kalimdor's Guild Keeps as they're captured."):format(n) end)
+    function(n)
+        if n == 1 then return "Be inside one of Kalimdor's Guild Keeps as it's captured." end
+        return ("Be inside %d of Kalimdor's Guild Keeps as they're captured."):format(n)
+    end)
 -- (only Overlord can see them taken - capture points, outposts, forts:
 -- `requires` puts a note on their cards and tooltips, Badges.Needs. Not
 -- Total Victory: a groupmate with Overlord can tell it, TV.)
@@ -373,10 +379,10 @@ function Badges.Resolve(e)
     return e.badge
 end
 
--- Moonstone for the kills (past Gold: 100,000 in all).
-Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
+-- Moonstone for the kills (past Gold: 50,000 in all).
+Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime", tier = "moonstone", goal = 50000, points = 500,
     name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-    desc = "Kill or assist in killing 100,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." }
+    desc = "Kill or assist in killing 50,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." }
 
 ---------------------------------------------------------------------------
 -- TIER TRACKS: one card for all the tiers of a badge
@@ -392,7 +398,7 @@ Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime
 -- ("Copper 10,000 kills", "Gold 1st place"). By what's counted; a badge can
 -- say its own (`measure`).
 local MEASURE = { captures = "captures", shobekaran = "captures", lesi_cave = "captures", ashenvale_outposts = "captures",
-    outposts = "outposts", forts = "forts", victory = "victories" }
+    outposts = "outposts", forts = "forts", victory = "victories", support = "times" }
 for _, b in ipairs(Badges.LIST) do
     if not b.measure then
         if b.kind == "lifetime" or b.kind == "weekly" then b.measure = "kills"

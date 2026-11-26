@@ -778,6 +778,14 @@ do
     local _, caps = ns.Captures.Weeks("captures")
     check(n == 1 and caps == 0, "I'm Doing My Part!: held Dor'Danil as Splintertree fell (not a capture of it)")
     check(ns.Badges.Needs(ns.Badges.Get("dp")) and ns.Badges.Get("dp").cat == "kalimdor", "I'm Doing My Part! on Kalimdor Defense, needs Overlord")
+    do
+        local B = ns.Badges
+        check(B.Get("dp").tier == "copper" and B.Get("dp2").goal == 3 and B.Get("dp3").goal == 6 and B.Get("dp4").goal == 10
+            and B.Get("dp").track == B.Get("dp4").track and B.Needs(B.Get("dp4")),
+            "I'm Doing My Part!: tiers 1, 3, 6, 10, one track, copper keeps the id dp, all need Overlord")
+        local m = B.Mine().badges
+        check(m.dp.times == 1 and m.dp2.times == 0 and m.dp2.value == 1, "I'm Doing My Part! once: copper, silver 1/3")
+    end
     -- (the same capture re-stamped a few seconds on, as a guildmate's sync of it does: once)
     st.capturedTime = st.capturedTime + 3; W.advance(2)
     _, n = ns.Captures.Weeks("support")
