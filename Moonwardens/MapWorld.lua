@@ -888,10 +888,13 @@ end, "world map tooltip")
 local function onShow()
     if off() or inInstance() then hideAll(); return end
     if not cacheCanvas() then return end
-    if not panel then buildPanel() end
     viewport:Show()
-    panel:Show()
-    placePanel()
+    -- (the side panel, all about layers: off with them, ns.LAYERS)
+    if ns.LAYERS then
+        if not panel then buildPanel() end
+        panel:Show()
+        placePanel()
+    end
     shownMap = readShownMap()
     acc = 1   -- draw on the first frame
     driver:Show()

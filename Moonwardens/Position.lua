@@ -374,10 +374,13 @@ ns.onLogin(function()
     ns:On("GROUP_ROSTER_UPDATE", rebuildGroup)
     -- Names can read as unknown for a moment after someone joins; recheck.
     ns.every(2, rebuildGroup, "group members")
-    ns:On("NAME_PLATE_UNIT_ADDED", function(unit) noteSeen(unit) end)
-    ns:On("UPDATE_MOUSEOVER_UNIT", function() noteSeen("mouseover") end)
-    ns:On("PLAYER_TARGET_CHANGED", function() noteSeen("target") end)
-    ns.every(5, scanPlayerPlates, "player plates")
+    -- (seen in the world: only for layers - off, ns.LAYERS, not looked for)
+    if ns.LAYERS then
+        ns:On("NAME_PLATE_UNIT_ADDED", function(unit) noteSeen(unit) end)
+        ns:On("UPDATE_MOUSEOVER_UNIT", function() noteSeen("mouseover") end)
+        ns:On("PLAYER_TARGET_CHANGED", function() noteSeen("target") end)
+        ns.every(5, scanPlayerPlates, "player plates")
+    end
     ns.every(1, function() Position.Tick() end, "position")
     ns:On("ZONE_CHANGED_NEW_AREA", function() ns.after(1, function() Position.Tick(true) end, "position zone") end)
     -- Loading screen or logout: drop my dot now; PLAYER_ENTERING_WORLD brings it back.

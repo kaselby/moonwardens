@@ -30,7 +30,9 @@
 --  * Forgotten after 10 minutes without a sighting.
 local _, ns = ...
 local Layer = {}
-ns.Layer = Layer
+-- (off, ns.LAYERS in Core.lua: none of it runs, and ns.Layer isn't there -
+-- everything that asks for a layer gets none. /mw debug, below, still works.)
+ns.Layer = ns.LAYERS and Layer or nil
 
 local MAX_AGE = 600
 local VOTES = 5                -- creatures remembered for a vote
@@ -396,6 +398,10 @@ ns.onLogin(function()
         end
         ns.db.peekBack = nil
     end
+    -- (and after combat, if they couldn't be put back in it)
+    ns:On("PLAYER_REGEN_ENABLED", function() if ns.db and ns.db.platesBack then putBack(ns.now()) end end)
+    -- (layers off: the nameplate settings above put back, if left changed, and nothing more)
+    if not ns.LAYERS then return end
     ns:On("NAME_PLATE_UNIT_ADDED", function(unit) if not inBorderQuiet() then observeUnit(unit, "plate") end end)
     ns:On("UPDATE_MOUSEOVER_UNIT", function() observeUnit("mouseover", "mouse") end)
     ns:On("PLAYER_TARGET_CHANGED", function() observeUnit("target", "target") end)
@@ -433,7 +439,6 @@ ns.onLogin(function()
     ns:On("GROUP_LEFT", function() softReset("left group") end)
     ns:On("GROUP_JOINED", function() softReset("joined group") end)
     ns:On("PLAYER_LOGOUT", function() putBack(nil) end)
-    ns:On("PLAYER_REGEN_ENABLED", function() if ns.db and ns.db.platesBack then putBack(ns.now()) end end)
     ns.every(1, tick, "layer tick")
 end, "layer")
 
@@ -468,6 +473,7 @@ ns.slash.layer = { help = "your layer in this zone and how it was found", fn = f
         end
     end
 end }
+if not ns.LAYERS then ns.slash.layer = nil end   -- (layers off: no /mw layer)
 
 ---------------------------------------------------------------------------
 -- /mw debug: NPC IDs on their tooltips, for testing whether the game still

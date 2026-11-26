@@ -29,6 +29,9 @@
 --   something new, at most every RESEND s otherwise; lists of 4-character
 --   fingerprints joined by ",". The fingerprint is a hash: no GUID is sent.
 local _, ns = ...
+-- (off, ns.LAYERS in Core.lua: none of this file runs - nothing sent, F, LR
+-- and LN from others ignored, and ns.LayerLink isn't there)
+if not ns.LAYERS then return end
 local LL = {}
 ns.LayerLink = LL
 

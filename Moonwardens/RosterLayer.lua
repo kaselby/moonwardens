@@ -29,6 +29,9 @@
 --    game doesn't have (its own SortByColumnIndex ignores it), and after
 --    that we sort the list ourselves.
 -- This doesn't load the guild window; it attaches when the game loads it.
+-- Layers off (ns.LAYERS, Core.lua): no Layer column or heading - Rank stays
+-- after Zone, as the game has it; the rest (names, widths, badges, the
+-- tooltip) as ever.
 local _, ns = ...
 local RL = {}
 ns.RosterLayer = RL
@@ -223,6 +226,13 @@ local function refreshRow(row)
         hideBadges(row)
         return
     end
+    row.Zone:SetWidth(ZONE_W)
+    row.Rank:SetSize(RANK_W, 0)
+    if not ns.LAYERS then                 -- (no Layer column: Rank where the game put it)
+        if cell then cell:Hide() end
+        if row.Note then refreshBadges(row, info) end
+        return
+    end
     if not cell then
         cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         cell:SetJustifyH("LEFT")
@@ -230,8 +240,6 @@ local function refreshRow(row)
         cell:SetSize(CELL_W, 0)
         cells[row] = cell
     end
-    row.Zone:SetWidth(ZONE_W)
-    row.Rank:SetSize(RANK_W, 0)
     cell:ClearAllPoints()
     cell:SetPoint("LEFT", row.Zone, "RIGHT", GAP, 0)
     row.Rank:ClearAllPoints()
@@ -423,7 +431,7 @@ local function layoutHeader(cd, columnInfo)
         if badgeHeader then badgeHeader:Hide() end
         return
     end
-    if not header then
+    if not header and ns.LAYERS then
         header = CreateFrame("Button", nil, cd, "ColumnDisplayButtonTemplate")
         header:SetText("Layer")
         header:SetScript("OnClick", ns.guard(onHeaderClick, "roster layer sort"))
@@ -443,13 +451,16 @@ local function layoutHeader(cd, columnInfo)
     if name then name:SetWidth(columnInfo[3].width + NAME_EXTRA) end
     zone:SetWidth(ZONE_HEAD)
     rank:SetWidth(RANK_HEAD)
-    -- (headings overlap by 2 px each side, as the game lays them)
-    header:SetWidth(CELL_W + GAP + 2)
-    header:ClearAllPoints()
-    header:SetPoint("BOTTOMLEFT", zone, "BOTTOMRIGHT", -2, 0)
-    rank:ClearAllPoints()
-    rank:SetPoint("BOTTOMLEFT", header, "BOTTOMRIGHT", -2, 0)
-    header:Show()
+    -- (headings overlap by 2 px each side, as the game lays them; no Layer
+    -- heading, layers off: Rank's where the game put it, after Zone)
+    if header then
+        header:SetWidth(CELL_W + GAP + 2)
+        header:ClearAllPoints()
+        header:SetPoint("BOTTOMLEFT", zone, "BOTTOMRIGHT", -2, 0)
+        rank:ClearAllPoints()
+        rank:SetPoint("BOTTOMLEFT", header, "BOTTOMRIGHT", -2, 0)
+        header:Show()
+    end
     -- Badges, after Rank; Note after it.
     if not note then
         if badgeHeader then badgeHeader:Hide() end
@@ -483,7 +494,7 @@ local function layoutHeader(cd, columnInfo)
     if not rp then badgeHeader:SetWidth(w + GAP + 2) end
     badgeHeader:Show()
     if changed then refreshRows(false) end
-    header:Show()
+    if header then header:Show() end
 end
 
 local function attach()

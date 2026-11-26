@@ -189,9 +189,10 @@ UI.SETTINGS = {
     { "sound", "Play a sound for alerts" },
     { "Map" },
     { "worldDots", "Show guildies on the world map" },
-    { "otherLayers", "Show guildies on other layers (faded)" },
+    -- (layers off for now, ns.LAYERS: their two settings hidden)
+    -- { "otherLayers", "Show guildies on other layers (faded)" },
     { "minimapDots", "Show guildies on the minimap" },
-    { "layerPlates", "Show nameplates for a moment to read my layer" },
+    -- { "layerPlates", "Show nameplates for a moment to read my layer" },
     -- totalRP3 profiles (RP.lua): maps, the guild roster and the
     -- Leaderboard tab. Profiles guildies phoned in work without totalRP3.
     { "Roleplay" },

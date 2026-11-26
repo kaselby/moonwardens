@@ -12,6 +12,9 @@ for line in io.lines("Moonwardens/Moonwardens.toc") do
     if line:match("%.lua$") then
         local chunk = assert(loadfile("Moonwardens/" .. line))
         chunk("Moonwardens", ns)
+        -- (layers are off for release, Core.lua; on here, to keep checking
+        -- their code: tests/layers_off.lua checks them off)
+        if line == "Core.lua" then ns.LAYERS = true end
     end
 end
 W.fire("ADDON_LOADED", "Moonwardens")
@@ -796,6 +799,126 @@ do
     check(n == 2, "retaken 2 min on (Attack both ways): counts again")
     _G.Overlord = nil
     ns.db.objectiveCaptures = keep
+end
+
+-- Three Moonwardens inside one capture point, outpost or fort as it's
+-- taken: me, Thalanor and Caelith. My client credits me once - their
+-- clients re-stamp the capture as their syncs of it arrive, a few seconds
+-- apart - so my progress goes up by exactly one; at the tier's goal I
+-- claim it once, to the guild. Their claims come in: theirs on their
+-- boards (a claim sent twice, or twice over, counted once), mine unchanged.
+-- (A small Overlord, faked; me one short of each copper tier beforehand.)
+do
+    local B, C, LB = ns.Badges, ns.Captures, ns.Leaderboard
+    local keepCaps, keepClaimed = ns.db.objectiveCaptures, ns.db.badgeClaimed
+    local keepDB = _G.OverlordDB
+    local me, tha, cae = ns.meKey, ns.key("Thalanor-Oakheart"), ns.key("Caelith-Shade")
+    local function claimsSent(badge)
+        local n = 0
+        for _, m in ipairs(W.sent) do
+            if m.m:find("^BL|1|[^|]+|claim|%d+|" .. me .. "|" .. me .. "|" .. badge .. "|") then n = n + 1 end
+        end
+        return n
+    end
+    local seq = 0
+    local function theirClaim(sender, badge, times, value)
+        seq = seq + 1
+        local who = ns.key(sender)
+        local t = B.FRESH_START + 50000 + seq    -- (the sim's clock is from before the fresh start: a claim then is dropped)
+        local id = ("%xab%03x"):format(t, seq)
+        local m = ("BL|1|%s|claim|%d|%s|%s|%s|%d|%d|%d|0.6.0||"):format(id, t, who, who, badge, times, LB.WeekOf(t), value)
+        W.fire("CHAT_MSG_ADDON", "MWG1", m, "GUILD", sender)
+        return m
+    end
+    local function printed(what, from)
+        local n = 0
+        for i = from + 1, #W.prints do if W.prints[i]:find(what, 1, true) then n = n + 1 end end
+        return n
+    end
+
+    -- One kind: `series`, the copper tier `badge`, the place's `zone` (an
+    -- objective id or a site key), `take(ct)` takes it for us at `ct`,
+    -- `what` the line it prints.
+    local function together(label, series, badge, zone, take, what)
+        local goal = B.Get(badge).goal
+        -- (me one short: goal - 1 of them before, long ago, a place in the region)
+        local seeds = {}
+        for i = 1, goal - 1 do
+            local at = B.FRESH_START + 1000 * i
+            seeds[i] = { series = series, zone = zone, name = zone, at = at, week = LB.WeekOf(at) }
+        end
+        ns.db.objectiveCaptures = seeds
+        ns.db.badgeClaimed = {}
+        local _, before = C.Weeks(series)
+        W.advance(3)                                     -- (inside it a while, before it falls)
+        local claims0, from = claimsSent(badge), #W.prints
+        local ct = time()
+        take(ct); W.advance(2)
+        take(ct + 2); W.advance(1)                       -- (Thalanor's sync of it: re-stamped)
+        take(ct + 5); W.advance(3)                       -- (Caelith's, later still)
+        local _, after = C.Weeks(series)
+        check(before == goal - 1 and after == goal, label .. ": taken together, my progress up by one ("
+            .. tostring(before) .. " -> " .. tostring(after) .. ")")
+        check(printed(what, from) == 1, label .. ": told once")
+        local mine = B.Mine().badges[badge]
+        check(mine and mine.times == 1, label .. ": my copper tier earned once")
+        W.advance(3)                                     -- (the claim goes out)
+        check(claimsSent(badge) == claims0 + 1, label .. ": claimed once, to the guild")
+        -- Their claims: each on their own board, mine unchanged.
+        local m = theirClaim("Thalanor-Oakheart", badge, 1, goal)
+        W.fire("CHAT_MSG_ADDON", "MWG1", m, "GUILD", "Thalanor-Oakheart")   -- (the same claim heard twice)
+        theirClaim("Thalanor-Oakheart", badge, 1, goal)                   -- (and claimed twice over)
+        theirClaim("Caelith-Shade", badge, 1, goal)
+        W.advance(1)
+        local t, c = B.Of(tha).badges[badge], B.Of(cae).badges[badge]
+        check(t and t.times == 1 and c and c.times == 1, label .. ": their copper tiers from their claims, once each")
+        local _, still = C.Weeks(series)
+        check(still == goal and B.Mine().badges[badge].times == 1, label .. ": their claims don't change mine")
+        check(claimsSent(badge) == claims0 + 1, label .. ": no second claim of mine")
+    end
+
+    local inZone, onSite
+    local node = { id = "ash_forest_song", name = "Forest Song", status = "captured", owner = "Horde", capturedTime = 1 }
+    local outpost = { siteKey = "anadora", id = "anadora" }
+    local fort = { siteKey = "mulgore", id = "mulgore" }
+    _G.OverlordDB = { outposts = {
+        anadora = { status = "held", ownerFaction = "Horde", claimedAt = 0 },
+        mulgore = { status = "held", ownerFaction = "Horde", claimedAt = 0 },
+    } }
+    _G.Overlord = {
+        PlayerFaction = "Alliance", L = {},
+        Fronts = { activeFrontId = "ashenvale", ResolveFrontByMapID = function() return {} end },
+        Zones = { GetCurrentPlayerZone = function() return inZone end },
+        ZoneDatabase = { node },
+        OutpostSites = { anadora = outpost },
+        GuildKeepSites = { mulgore = fort },
+        Outpost = {
+            IsPlayerOnOutpostMap = function() return onSite ~= nil, onSite end,
+            IsPlayerInOutpostGeometry = function(_, site) return site == onSite end,
+        },
+    }
+
+    inZone = node
+    together("capture point", "captures", "ol1", node.id, function(ct)
+        node.status, node.owner, node.capturedTime = "captured", "Alliance", ct
+    end, "Objective taken, with you in it:")
+    inZone = nil
+
+    onSite = outpost
+    together("outpost", "outposts", "ul1", "anadora", function(ct)
+        local st = OverlordDB.outposts.anadora
+        st.status, st.ownerFaction, st.claimedAt = "held", "Alliance", ct
+    end, "Outpost taken, with you in it:")
+
+    onSite = fort
+    together("fort", "forts", "fl1", "mulgore", function(ct)
+        local st = OverlordDB.outposts.mulgore
+        st.status, st.ownerFaction, st.claimedAt = "held", "Alliance", ct
+    end, "Fort taken, with you in it:")
+    onSite = nil
+
+    _G.Overlord, _G.OverlordDB = nil, keepDB
+    ns.db.objectiveCaptures, ns.db.badgeClaimed = keepCaps, keepClaimed
 end
 
 -- An offline guildie's badges: no whisper (the game would say "No player

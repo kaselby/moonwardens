@@ -33,6 +33,15 @@ end
 
 function ns.now() return GetTime() end
 
+-- Layers: off for the stable release (the detection is too unsure to show).
+-- Off, nothing reads or works out a layer: no creature or nameplate reading
+-- (Layer.lua), no sightings or layer numbers between guildies (LayerLink.lua),
+-- no layer panel on the world map, no Layer column on the roster, and the two
+-- layer settings hidden. Positions and alerts still carry their layer field,
+-- always 0 ("not known"), so older versions read them as before. Every
+-- guildie's dot is drawn plain. true brings it all back; nothing was removed.
+ns.LAYERS = false
+
 ---------------------------------------------------------------------------
 -- Names. On Forever a character is "First Surname"; addon senders arrive as
 -- "First-Surname" or "First Surname", sometimes with "-Realm" after.
