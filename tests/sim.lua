@@ -526,6 +526,9 @@ W.map = 1440; W.hk = 0; W.advance(6); W.hk = 2; W.fire("PLAYER_PVP_KILLS_CHANGED
 check(LB.Mine() == 5, "counter reset (new day) handled")
 W.instance = true; W.hk = 3; W.advance(6); W.instance = false
 check(LB.Mine() == 5, "kill in an instance (Warsong) not counted")
+W.map = 2482
+check(LB.Counts(), "Mount Hyjal counts (map 2482)")
+W.map = 1440
 local nH = countSent("H")
 W.advance(31)
 check(countSent("H") == nH + 1 and lastSent("H").m == "H|1|" .. wk .. "|5", "one debounced H: " .. tostring(lastSent("H") and lastSent("H").m))
@@ -720,6 +723,95 @@ do
     local un = {}
     for _, it in ipairs(B.Unearned(fake)) do un[it.b.id] = true end
     check(un.lt3 and not un.lt4 and not un.lt1, "unacquired: Wrath's next tier (Gold) only")
+end
+
+-- Outposts and forts: only Kalimdor's count (Captures.REGION)
+do
+    local C, at = ns.Captures, ns.Badges.FRESH_START + 100
+    local keep = ns.db.objectiveCaptures
+    ns.db.objectiveCaptures = {
+        { series = "outposts", zone = "ashenvale", at = at, week = 1 },     -- Shobek'Aran: counts
+        { series = "outposts", zone = "tanaris", at = at, week = 1 },       -- Broken Pillar: counts
+        { series = "outposts", zone = "elwynn", at = at, week = 1 },        -- Thunder Falls: doesn't
+        { series = "forts", zone = "mulgore", at = at, week = 1 },          -- Prairie Keep: counts
+        { series = "forts", zone = "wetlands", at = at, week = 1 },         -- Menethil Keep: doesn't
+    }
+    local _, o = C.Weeks("outposts")
+    local _, f = C.Weeks("forts")
+    check(o == 2 and f == 1, "only Kalimdor's outposts and forts count")
+    local B = ns.Badges
+    check(B.Get("ul1").name == "Elune's Reach" and B.Get("fl1").name == "Ancient of War", "outposts: Elune's Reach; forts: Ancient of War")
+    check(B.Needs(B.Get("fl2")) == "Requires the Overlord addon." and B.Needs(B.Get("ul4")) and B.Needs(B.Get("ol1")) and not B.Get("bk1")
+        and not B.Needs(B.Get("lt1")) and not B.Needs(B.Get("tv")) and not B.Needs(B.Get("lb1")),
+        "the Overlord note on captures, outposts and forts only; Bankai! gone")
+    -- Kalimdor Defense: Ashenvale Defense and Overlord, one page
+    local kal = {}
+    for _, b in ipairs(B.InCategory("kalimdor")) do kal[b.name] = true end
+    check(B.IsPage("kalimdor") and not B.IsPage("ashenvale") and not B.IsPage("overlord")
+        and kal["Wrath of the Kaldorei"] and kal["Chosen of Elune (Weekly)"] and kal["Elune's Reach"] and kal["Ancient of War"],
+        "one Kalimdor Defense page with both pages' badges")
+    ns.db.objectiveCaptures = keep
+end
+
+-- I'm Doing My Part!: inside Dor'Danil Barrow Den or Raynewood Retreat as
+-- Splintertree Post falls (a small Overlord, faked)
+do
+    local keep = ns.db.objectiveCaptures
+    ns.db.objectiveCaptures = {}
+    local inZone
+    local st = { id = "ash_splintertree", name = "Splintertree Post", status = "held", owner = "Horde" }
+    local dd = { id = "ash_dor_danil", name = "Dor'Danil Barrow Den", status = "captured", owner = "Alliance", capturedTime = 1 }
+    _G.Overlord = {
+        PlayerFaction = "Alliance",
+        Fronts = { activeFrontId = "ashenvale", ResolveFrontByMapID = function() return {} end },
+        Zones = { GetCurrentPlayerZone = function() return inZone end },
+        ZoneDatabase = { st, dd },
+    }
+    inZone = dd
+    W.advance(3)                                          -- (inside Dor'Danil; Splintertree seen, not ours)
+    st.status, st.owner, st.capturedTime = "captured", "Alliance", time()
+    W.advance(2)
+    local _, n = ns.Captures.Weeks("support")
+    local _, caps = ns.Captures.Weeks("captures")
+    check(n == 1 and caps == 0, "I'm Doing My Part!: held Dor'Danil as Splintertree fell (not a capture of it)")
+    check(ns.Badges.Needs(ns.Badges.Get("dp")) and ns.Badges.Get("dp").cat == "kalimdor", "I'm Doing My Part! on Kalimdor Defense, needs Overlord")
+    -- (the same capture re-stamped a few seconds on, as a guildmate's sync of it does: once)
+    st.capturedTime = st.capturedTime + 3; W.advance(2)
+    _, n = ns.Captures.Weeks("support")
+    check(n == 1, "a capture re-stamped by a guildmate's sync counts once")
+    -- (elsewhere when it falls again: nothing)
+    inZone = nil
+    st.status, st.owner = "held", "Horde"; W.advance(2)
+    -- (four minutes on: a real retake, with me inside neither)
+    W.advance(240)
+    st.status, st.owner, st.capturedTime = "captured", "Alliance", time(); W.advance(2)
+    _, n = ns.Captures.Weeks("support")
+    check(n == 1, "not inside either approach: doesn't count")
+    -- (lost and retaken as fast as Attack allows, 60 s each, me in Dor'Danil: a capture of its own)
+    inZone = dd
+    W.advance(2)
+    st.status, st.owner = "held", "Horde"; W.advance(60); W.advance(58)
+    st.status, st.owner, st.capturedTime = "captured", "Alliance", time(); W.advance(2)
+    _, n = ns.Captures.Weeks("support")
+    check(n == 2, "retaken 2 min on (Attack both ways): counts again")
+    _G.Overlord = nil
+    ns.db.objectiveCaptures = keep
+end
+
+-- An offline guildie's badges: no whisper (the game would say "No player
+-- named ..."); what an online one sends is kept for when they're offline
+do
+    ns.Roster.Build()
+    local vel, tha = ns.key("Velanya-Dawnleaf"), ns.key("Thalanor-Oakheart")
+    local before = countSent("BQ")
+    ns.Badges.Request(vel); W.advance(2)
+    check(countSent("BQ") == before, "offline guildie: badges not asked for")
+    W.advance(11)
+    ns.Badges.Request(tha); W.advance(2)
+    check(countSent("BQ") == before + 1, "online guildie: badges asked for")
+    W.fire("CHAT_MSG_ADDON", "MWG1", "BS|1|1|1|2900:7", "WHISPER", "Thalanor-Oakheart")
+    local c = ns.db.badgeCache and ns.db.badgeCache[tha]
+    check(c and c.weeks and c.weeks[2900] == 7 and ns.Badges.SavedAt(tha), "their answer kept between sessions")
 end
 
 local errs = {}

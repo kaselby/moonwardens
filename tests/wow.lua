@@ -26,7 +26,10 @@ Widget.__index = function(t, k)
 end
 function Widget:SetScript(k, fn) self._scripts[k] = fn end
 function Widget:GetScript(k) return self._scripts[k] end
-function Widget:HookScript(k, fn) self._scripts[k] = fn end
+function Widget:HookScript(k, fn)          -- (after what's there, as the game's)
+    local old = self._scripts[k]
+    self._scripts[k] = old and function(...) old(...); return fn(...) end or fn
+end
 function Widget:Show() self._shown = true; if self._scripts.OnShow then self._scripts.OnShow(self) end end
 function Widget:Hide() self._shown = false end
 function Widget:IsShown() return self._shown ~= false end

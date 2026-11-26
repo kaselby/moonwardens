@@ -1,5 +1,5 @@
--- Leaderboard: Horde players killed in Ashenvale and at Stonetalon Peak, per
--- week, shared through the guild.
+-- Leaderboard: Horde players killed in Ashenvale, Mount Hyjal and at
+-- Stonetalon Peak, per week, shared through the guild.
 -- Any kill counts, honorable or not (Krylea, 11-09): grey-level Horde too.
 -- Weeks run on the game's Tuesday reset, the same weeks and messages as 0.5,
 -- so every version shares one board. Sunday weeks (Krylea, 11-15) are on hold
@@ -15,6 +15,7 @@ ns.Leaderboard = LB
 
 local ASHENVALE = 1440
 local STONETALON = 1442
+local HYJAL = 2482               -- (this realm's Mount Hyjal map)
 local PEAK = "Stonetalon Peak"   -- the subzone; the rest of Stonetalon doesn't count
 local WEEK = 604800
 -- A known reset: Tuesday 2024-01-02 15:00 UTC (US weekly reset).
@@ -96,13 +97,15 @@ end
 ---------------------------------------------------------------------------
 -- Counting my kills
 ---------------------------------------------------------------------------
--- Ashenvale, or the Stonetalon Peak subzone of Stonetalon Mountains.
+-- Ashenvale, Mount Hyjal, or the Stonetalon Peak subzone of Stonetalon
+-- Mountains.
 local function counts()
     local inside, kind = ns.try(IsInInstance)
     if inside == true and kind ~= "none" then return false end
     local map = ns.try(C_Map.GetBestMapForUnit, "player")
     local zone = ns.try(GetZoneText)
     if map == ASHENVALE or zone == "Ashenvale" then return true end
+    if map == HYJAL or zone == "Mount Hyjal" then return true end
     if map == STONETALON or zone == "Stonetalon Mountains" then
         return ns.try(GetSubZoneText) == PEAK or ns.try(GetMinimapZoneText) == PEAK
     end
@@ -208,7 +211,7 @@ end
 
 function LB.PartyKill(attacker, victim)
     if type(victim) ~= "string" or not ns.readable(victim) then return end
-    -- Only players. In open-world Ashenvale and Stonetalon every player who
+    -- Only players. In open-world Ashenvale, Hyjal and Stonetalon every player who
     -- can die to us is Horde (no duels to the death, no free-for-all areas).
     if victim:sub(1, 7) ~= "Player-" then return end
     kill("p", victim, attacker)
@@ -486,7 +489,7 @@ local function refresh(f)
     local resetAt = LB.NextReset()
     local left = resetAt - (ns.try(GetServerTime) or time())
     if f.week == 0 then
-        f.sub:SetText(("Ashenvale and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
+        f.sub:SetText(("Ashenvale, Mount Hyjal and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
             duration(left), total))
     else
         f.sub:SetText(("Final standings  -  guild total |cffffd100%d|r"):format(total))
@@ -521,7 +524,7 @@ local function refresh(f)
     else
         f.empty:Hide()
     end
-    local foot = "Counts Horde killed by you or your group in Ashenvale/Stonetalon Peak."
+    local foot = "Counts Horde killed by you or your group in Ashenvale, Mount Hyjal or Stonetalon Peak."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
@@ -557,7 +560,7 @@ ns.onLogin(function()
     end, "hk login")
 end, "leaderboard")
 
-ns.slash.hk = { help = "my Horde kills this week (Ashenvale and Stonetalon Peak)", fn = function()
+ns.slash.hk = { help = "my Horde kills this week (Ashenvale, Mount Hyjal and Stonetalon Peak)", fn = function()
     ns.print(("%d Horde kills this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
 end }
 

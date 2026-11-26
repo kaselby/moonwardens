@@ -518,6 +518,9 @@ local function badgeTooltip(owner, b, e)
     elseif b.kind == "rank" then
         lines[#lines + 1] = { ("Comes with the rank of %s."):format(b.rank), 1, 0.82, 0 }
     end
+    -- (an addon it needs: in gold under its progress, as on its card)
+    local needs = Badges.Needs(b)
+    if needs then lines[#lines + 1] = { needs, 1, 0.82, 0 } end
     if #lines > 0 then
         GameTooltip:AddLine(" ")
         for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], true) end
@@ -876,6 +879,11 @@ local function newCard(parent)
     c.info = text(c, "GameFontNormalSmall")
     c.info:SetPoint("TOPLEFT", 84, -(CARD_H - 30))
     c.info:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+    -- (an addon it needs, Badges.Needs: under the bar, as `info` is drawn)
+    c.needs = text(c, "GameFontNormalSmall")
+    c.needs:SetPoint("TOPLEFT", 84, -(CARD_H - 18))
+    c.needs:SetPoint("RIGHT", c, "RIGHT", -70, 0)
+    c.needs:Hide()
     -- A parent's children, listed under it (as Explore Azeroth's are); the
     -- parent folds them away with a click, Legacy's +/- showing which.
     c.plus = c:CreateTexture(nil, "OVERLAY")
@@ -1085,8 +1093,14 @@ local function fillCard(c, b, e, key, result, opts)
     c.report:SetShown(canReport and true or false)
     c.report:SetEnabled(not off)
     if canReport then c.report:SetText("Report a " .. (b.unit or "Patrol"):gsub("^%l", string.upper)) end
-    c.progress:SetPoint("TOPRIGHT", canReport and -140 or -70, -(CARD_H - 28))
-    c.progress:SetPoint("TOPLEFT", #kids > 0 and 104 or 84, -(CARD_H - 28))   -- (room for a parent's +/-)
+    -- (an addon it needs: its line under the bar, the bar up a little to
+    -- make room)
+    local needs = Badges.Needs(b)
+    c.needs:SetText(needs or "")
+    c.needs:SetShown(needs ~= nil)
+    local barY = needs and (CARD_H - 38) or (CARD_H - 28)   -- (2 px more room above the line, 2 below)
+    c.progress:SetPoint("TOPRIGHT", canReport and -140 or -70, -barY)
+    c.progress:SetPoint("TOPLEFT", #kids > 0 and 104 or 84, -barY)   -- (room for a parent's +/-)
 
     -- A parent's children: two columns of rows, each a badge of its own
     -- (icon, level and name, points, a check once earned; its own tooltip).
@@ -1231,10 +1245,12 @@ local function searchHits(result)
 end
 
 -- A category's cards: the earned ones first (a track: any tier; a compound
--- badge: any of its own), else the list's order. A past month's bounties
--- with none done aren't shown: only this month's are there to be hunted.
+-- badge: any of its own), else the list's order; of those not earned, a
+-- badge marked `lead` first. A past month's bounties with none done aren't
+-- shown: only this month's are there to be hunted.
 local function earnedFirst(list, result)
     local out, rest = {}, {}
+    local lead = {}
     for _, b in ipairs(list) do
         local e = result.badges[b.id] or { times = 0 }
         local got
@@ -1243,8 +1259,10 @@ local function earnedFirst(list, result)
         else got = e.times > 0 end
         local past = b.kind == "parent" and b.month and Badges.BOUNTY and b.month ~= Badges.BOUNTY.month
         if got then out[#out + 1] = b
+        elseif not past and b.lead then lead[#lead + 1] = b
         elseif not past then rest[#rest + 1] = b end
     end
+    for _, b in ipairs(lead) do out[#out + 1] = b end
     for _, b in ipairs(rest) do out[#out + 1] = b end
     return out
 end
@@ -1555,6 +1573,10 @@ local function newBoard(parent, opts)
     bd.slots = {}
     for i = 1, SHOW_N do bd.slots[i] = newBoardCell(bd, bd.tile, "NumberFontNormalLarge") end
     bd.none = text(bd, "GameFontDisable")
+    -- (mine: how to fill and empty the Showcase, under its slots, always)
+    bd.dragHint = text(bd, "GameFontDisable")
+    bd.dragHint:SetJustifyH("CENTER")
+    bd.dragHint:SetText("Drag a badge here to showcase it, or into your Collection to take it out.")
     bd.restHead = newHeading(bd, "Badge Collection")
     bd.grid = CreateFrame("Frame", nil, bd)
     bd.hint = text(bd.grid, "GameFontDisable")
@@ -1598,6 +1620,13 @@ local function newBoard(parent, opts)
             s:Show()
         end
         y = y - T - 12
+        self.dragHint:ClearAllPoints()
+        self.dragHint:SetShown(mine)
+        if mine then
+            self.dragHint:SetWidth(math.max(50, w - 8))       -- (a narrow board: it wraps)
+            self.dragHint:SetPoint("TOP", self, "TOPLEFT", math.floor(w / 2), y + 4)
+            y = y - math.max(12, math.ceil(self.dragHint:GetStringHeight() or 12)) - 4
+        end
         -- (no badges at all: the Collection's heading and its control stay -
         -- the Overview's View Only Acquired Badges must be there to untick -
         -- and "no badges yet" goes where its icons would be)
@@ -1646,7 +1675,7 @@ local function newBoard(parent, opts)
         if not any then
             self.hint:SetText(mine and "No badges yet. Defend Ashenvale to earn your first." or "No badges yet.")
         else
-            self.hint:SetText(mine and "Drag a badge here to take it out of your Showcase." or "Nothing more.")
+            self.hint:SetText("Nothing more.")
         end
         y = top - rows * pitch
         self:SetHeight(-y)
@@ -1824,8 +1853,17 @@ local function refresh(f)
     if key then
         f.viewing:Show()
         local heard = Badges.HeardFrom(key)
-        f.viewing.text:SetText(("Viewing: |cffffffff%s|r%s"):format(nameOf(key),
-            heard and "" or "  |cff9d9d9d(asking them for the rest...)|r"))
+        local m = ns.Roster and ns.Roster.Get(key)
+        local note = ""
+        if not heard and m and not m.online then
+            -- (offline: what they last sent, else what the guild has seen)
+            local at = Badges.SavedAt(key)
+            note = at and ("  |cff9d9d9d(offline: as of %s)|r"):format(date("%b %d", at))
+                or "  |cff9d9d9d(offline: only what the guild has seen)|r"
+        elseif not heard then
+            note = "  |cff9d9d9d(asking them for the rest...)|r"
+        end
+        f.viewing.text:SetText(("Viewing: |cffffffff%s|r%s"):format(nameOf(key), note))
         f.scroll:SetPoint("TOPLEFT", left, -32)
     else
         f.viewing:Hide()

@@ -12,7 +12,7 @@ The addon works out which layer you're on from the NPCs around you and shares it
 One button (or a keybind) calls nearby guildies for help. They get a banner, a sound and a pointer toward you. If they answer, they're invited to your group automatically, and the party becomes a raid when it fills up.
 
 ## Leaderboard
-Horde killed in Ashenvale or at Stonetalon Peak by you or your group, counted each week and shared across the guild. Honour doesn't matter: every kill counts. Resets every Tuesday. Your own kills are also logged with their time and place (**/mw kills**).
+Horde killed in Ashenvale, Mount Hyjal or at Stonetalon Peak by you or your group, counted each week and shared across the guild. Honour doesn't matter: every kill counts. Resets every Tuesday. Your own kills are also logged with their time and place (**/mw kills**).
 
 ## Update reminder
 When a newer version is out, you get one line in chat and a note on the minimap button.

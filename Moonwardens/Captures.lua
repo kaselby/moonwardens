@@ -2,10 +2,14 @@
 -- Objectives badges (Badges.lua, by `series`):
 --   captures  the Ashenvale front's capture points (no other front's)
 --             taken for our side while I stood inside their bounds;
---   outposts  guild outposts taken for our side while I was inside them;
+--   outposts  guild outposts taken for our side while I was inside them
+--             (Kalimdor's only count: Captures.REGION);
 --   forts     fortresses (guild keeps) likewise;
 --   ashenvale_outposts  Ashenvale's own outposts (Shobek'Aran, Lesi's Bear
 --             Cave): counted here as well as in outposts;
+--   support   Splintertree Post taken for our side while I was inside one
+--             of its two approaches, Dor'Danil Barrow Den or Raynewood
+--             Retreat (I'm Doing My Part!);
 --   victory   TOTAL VICTORY on the Ashenvale front (Tor ilisar'thera'nal!),
 --             with me in the group (party or raid) that took it: I or a
 --             group member inside the last objective taken. Only Overlord
@@ -43,15 +47,46 @@ local FRESH_FOR = 120       -- a capture time older than this (s) is old news
 local SPAN_GAP = 3          -- out of a place this long (s): the next time in is a new span
 local SPANS_KEPT = 6
 local AWAY_EVERY = 10       -- off the war maps: look this often (s)
+-- One capture, two times: Overlord re-stamps a capture when a guildmate's
+-- sync of it arrives (their clock, their message's time). A second capture of
+-- the same place for the same series this close (s) to the first is that.
+-- Taking it back for real needs the enemy's hold and then ours, each at
+-- least Overlord's hold less Attack's 60 s (platinum): capture points
+-- 120 - 60, outposts 300 - 60, guild keeps 600 - 60. Each window is half
+-- the quickest real retake (two such holds back to back), or less.
+local SAME_CAPTURE = { captures = 60, support = 60,
+                       outposts = 240, ashenvale_outposts = 240, shobekaran = 240, lesi_cave = 240,
+                       forts = 540,
+                       victory = 600 }   -- (one victory, heard twice)
+local function sameCapture(series, a, b)
+    return math.abs((a or 0) - (b or 0)) < (SAME_CAPTURE[series or "captures"] or 60)
+end
 local CAPTURE_FRONT = "ashenvale"   -- capture points count on this front only
 local ASHENVALE_OUTPOSTS = { ashenvale = true, lesi_bear_cave = true }   -- (Shobek'Aran, Lesi's Bear Cave)
--- ...and each on its own too (Shobek'Aran's: Bankai!; the others feed no
+-- ...and each on its own too (they feed no
 -- badge now, but are still counted, should one come back).
 local SITE_SERIES = { ashenvale = "shobekaran", lesi_bear_cave = "lesi_cave" }
+-- Splintertree Post, and the objectives that hold its approaches (its
+-- prerequisites on Overlord's map): inside one as it falls, "support".
+local SPLINTERTREE = "ash_splintertree"
+local APPROACHES = { "ash_dor_danil", "ash_raynewood" }
+-- The outposts and forts the badges count: Kalimdor's (Overlord's site
+-- keys). Taken elsewhere: still kept, but counted for nothing and not told.
+Captures.REGION = {
+    outposts = { lesi_bear_cave = true,   -- Lesi's Bear Cave (Darkshore)
+                 ashenvale = true,        -- Shobek'Aran (Ashenvale)
+                 durotar = true,          -- Jaggedswine Farm (Durotar)
+                 tanaris = true,          -- Broken Pillar (Tanaris)
+                 anadora = true },        -- Anad'Ora Moonwell (Feralas)
+    forts = { stonetalon = true,          -- Sun Rock Retreat (Stonetalon Mountains)
+              mulgore = true,             -- Prairie Keep (Mulgore)
+              crossroads = true },        -- Savanna Bastion (the Barrens)
+}
 
 local spans = {}            -- "kind:id" -> { { from, to }, ... } server times I was inside, newest last
 local seen = {}             -- "kind:id" -> capture time last seen (false: never captured; nil: not looked at)
 local nextAway = 0
+local deduped = false
 
 local function store()
     ns.db.objectiveCaptures = ns.db.objectiveCaptures or {}
@@ -62,6 +97,20 @@ local function store()
         for _, c in ipairs(ns.db.objectiveCaptures) do if (c.at or 0) >= fresh then kept[#kept + 1] = c end end
         ns.db.objectiveCaptures = kept
         ns.db.capturesFresh = fresh
+    end
+    -- (once: the ones counted twice before SAME_CAPTURE, gone)
+    if not deduped then
+        deduped = true
+        local kept, last = {}, {}
+        for _, c in ipairs(ns.db.objectiveCaptures) do
+            local k = (c.series or "captures") .. "|" .. tostring(c.zone)
+            local prev = last[k]
+            if not (prev and sameCapture(c.series, c.at, prev)) then
+                kept[#kept + 1] = c
+                last[k] = c.at or 0
+            end
+        end
+        ns.db.objectiveCaptures = kept
     end
     return ns.db.objectiveCaptures
 end
@@ -74,11 +123,13 @@ end
 
 local function serverNow() return ns.try(GetServerTime) or time() end
 
--- My entries of a series by week: { [week] = count }, and in all.
+-- My entries of a series by week: { [week] = count }, and in all. (A
+-- series with a REGION: only its sites.)
 function Captures.Weeks(series)
     local weeks, total = {}, 0
+    local only = Captures.REGION[series]
     for _, c in ipairs(ns.db and store() or {}) do
-        if (c.series or "captures") == series then
+        if (c.series or "captures") == series and (not only or only[c.zone]) then
             weeks[c.week] = (weeks[c.week] or 0) + 1
             total = total + 1
         end
@@ -110,8 +161,7 @@ local function credit(series, id, name, ct, what, quiet)
     local list = store()
     for _, c in ipairs(list) do
         if (c.series or "captures") == series and c.zone == id then
-            if c.at == ct then return end                                   -- (counted already)
-            if series == "victory" and math.abs(c.at - ct) < 600 then return end   -- (one victory, heard twice)
+            if sameCapture(series, c.at, ct) then return end                -- (counted already: SAME_CAPTURE)
         end
     end
     local LB = ns.Leaderboard
@@ -122,12 +172,15 @@ local function credit(series, id, name, ct, what, quiet)
 end
 
 -- A capture of `key` at `ct`: new since the last look, fresh, ours, and me in it?
-local function newCapture(key, ct, ours)
+-- (taken just now, for us - wherever I was)
+local function freshCapture(key, ct, ours)
     local was = seen[key]
     seen[key] = ct or false
     if not (ct and was ~= nil and ct ~= was and ours) then return false end
-    if math.abs(serverNow() - ct) > FRESH_FOR then return false end
-    return wasInside(key, ct)
+    return math.abs(serverNow() - ct) <= FRESH_FOR
+end
+local function newCapture(key, ct, ours)
+    return freshCapture(key, ct, ours) and wasInside(key, ct)
 end
 
 local function siteName(O, site)
@@ -182,8 +235,20 @@ local function tick()
         if zone.id then
             local ct = tonumber(zone.capturedTime)
             local ours = onAshenvale and zone.status == "captured" and faction and zone.owner == faction and not zone._loginSyncUnconfirmed
-            if newCapture("zone:" .. zone.id, ct, ours) then
-                credit("captures", zone.id, zone.name, ct, "Objective taken, with you in it:")
+            local key = "zone:" .. zone.id
+            if freshCapture(key, ct, ours) then
+                if wasInside(key, ct) then
+                    credit("captures", zone.id, zone.name, ct, "Objective taken, with you in it:")
+                end
+                -- (Splintertree Post: or holding one of its approaches)
+                if zone.id == SPLINTERTREE then
+                    for _, id in ipairs(APPROACHES) do
+                        if wasInside("zone:" .. id, ct) then
+                            credit("support", zone.id, zone.name, ct, "I'm Doing My Part! You held the line as it fell:")
+                            break
+                        end
+                    end
+                end
             end
         end
     end
@@ -198,7 +263,8 @@ local function tick()
                     if ct and ct <= 0 then ct = nil end
                     local ours = st.status == "held" and faction and st.ownerFaction == faction
                     if newCapture("site:" .. key, ct, ours) then
-                        credit(pair[2], key, siteName(O, site), ct, pair[3])
+                        local counts = not Captures.REGION[pair[2]] or Captures.REGION[pair[2]][key]
+                        credit(pair[2], key, siteName(O, site), ct, pair[3], not counts)
                         if pair[2] == "outposts" and ASHENVALE_OUTPOSTS[key] then
                             credit("ashenvale_outposts", key, siteName(O, site), ct, nil, true)
                         end

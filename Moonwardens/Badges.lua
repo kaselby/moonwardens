@@ -46,10 +46,10 @@ end
 -- nothing in them yet.
 Badges.CATEGORIES = {
     { id = "overview", name = "Badges Overview" },
-    -- Ashenvale's kills, objectives and Leaderboard places, one page.
-    { id = "ashenvale", name = "Ashenvale Defense" },
-    -- Overlord's guild outposts and forts, anywhere (Captures.lua).
-    { id = "overlord", name = "Overlord" },
+    -- Kalimdor Defense: the Leaderboard's kills and places, Ashenvale's
+    -- objectives, and Kalimdor's guild outposts and forts (Captures.lua), one
+    -- page. (Was two: Ashenvale Defense and Overlord.)
+    { id = "kalimdor", name = "Kalimdor Defense" },
     -- Huntress Training's monthly bounties, then the Ritual of the Hunt.
     { id = "wyldhunt", name = "The Wyld Hunt" },
 }
@@ -108,17 +108,18 @@ local LIFETIME_ICON = { "inv_ability_eluneschosendruid_boundlessmoonlight", "Spe
 -- (Retired ids, never to be reused: wk1-4 Moonglaive Hunt, ow1-4 Reclaim
 -- Our Home, aw1-4 Uproot the Invaders, lc1-4 War-Den, uw1-4 Moon's
 -- Conquest, fw1-4 Glaives at the Gate, cv the first Cadre of Vengeance,
--- fh Failed Hunt. What was earned of them no longer counts.)
+-- fh Failed Hunt, bk1-4 Bankai! (Shobek'Aran: Elune's Reach counts it).
+-- What was earned of them no longer counts.)
 Badges.LIST = {
-    { id = "lt1", cat = "ashenvale", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
+    { id = "lt1", cat = "kalimdor", kind = "lifetime", tier = "copper", goal = 10000, points = 50,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 10,000 Horde in Ashenvale or Stonetalon." },
-    { id = "lt2", cat = "ashenvale", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
+      desc = "Kill or assist in killing 10,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
+    { id = "lt2", cat = "kalimdor", kind = "lifetime", tier = "silver", goal = 25000, points = 100,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 25,000 Horde in Ashenvale or Stonetalon." },
-    { id = "lt3", cat = "ashenvale", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
+      desc = "Kill or assist in killing 25,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
+    { id = "lt3", cat = "kalimdor", kind = "lifetime", tier = "gold", goal = 50000, points = 250,
       name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-      desc = "Kill or assist in killing 50,000 Horde in Ashenvale or Stonetalon." },
+      desc = "Kill or assist in killing 50,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." },
 }
 -- Patrols: no client can count these. Guildies report a patrol (the card's
 -- Report a Patrol), officers approve it in the Officers tab (or award it
@@ -173,51 +174,59 @@ local function objectiveSet(cat, series, idW, idL, what, plural, icon, weekly, l
         }
     end
 end
-local function times(n) return n == 1 and "1 time" or (n .. " times") end
 -- Total Victory: every one counts again ("selfcount").
 Badges.LIST[#Badges.LIST + 1] = {
-    id = "tv", cat = "ashenvale", kind = "selfcount", series = "victory", points = 50, goal = 1,
+    id = "tv", cat = "kalimdor", kind = "selfcount", series = "victory", points = 50, goal = 1,
     name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
     desc = "Be in the party or raid that takes all of Ashenvale on Overlord.",
 }
--- Ashenvale Defense: the Ashenvale front's capture points (no other
--- front's), and Shobek'Aran, one of Ashenvale's two outposts.
-local OUTPOST_LIFETIME = { { "copper", 10, 35 }, { "silver", 30, 75 }, { "gold", 75, 150 }, { "moonstone", 150, 300 } }
-objectiveSet("ashenvale", "captures", "ow", "ol", { nil, "The Forest Remembers" }, "Ashenvale capture points",
+-- Holding the line: inside one of Splintertree Post's two approaches
+-- (Overlord's prerequisites for it) as it falls - each time counts again
+-- (Captures.lua, series "support").
+Badges.LIST[#Badges.LIST + 1] = {
+    id = "dp", cat = "kalimdor", kind = "selfcount", series = "support", points = 25, goal = 1,
+    name = "I'm Doing My Part!", icon = { "ability_warrior_rallyingcry", "INV_BannerPVP_02" },
+    desc = "Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured.",
+}
+-- Kalimdor Defense: the Ashenvale front's capture points (no other
+-- front's).
+objectiveSet("kalimdor", "captures", "ow", "ol", { nil, "Protect Our Sacred Groves" }, "Ashenvale capture points",
     { "spell_nature_protectionformnature", "Achievement_BG_winWSG" },
     {},
     { { "copper", 100, 25 }, { "silver", 400, 50 }, { "gold", 1000, 100 }, { "moonstone", 2500, 250 } },
     nil,
     function(n) return ("Be inside %d Ashenvale capture points when they are captured."):format(n) end)
--- Shobek'Aran's lifetime: "Bankai!".
-local function siteLifetime(series, idL, name, site, icon)
-    for i, t in ipairs(OUTPOST_LIFETIME) do
-        Badges.LIST[#Badges.LIST + 1] = {
-            id = idL .. i, cat = "ashenvale", kind = "selflifetime", series = series, tier = t[1], goal = t[2], points = t[3],
-            name = name, icon = icon, unit = site .. " captures",
-            desc = ("Capture %s %s."):format(site, times(t[2])),
-        }
-    end
-end
-siteLifetime("shobekaran", "bk", "Bankai!", "Shobek'Aran",
-    { "inv_sword_1h_katana_b_03", "inv_sword_1h_pandariaquest_b_01", "inv_sword_1h_pvppandarias1_c_01", "INV_Sword_36", "INV_Sword_19", "Achievement_Zone_Ashenvale_01" })   -- (a katana)
--- Overlord: guild outposts and forts on any map. (Their counts: about
--- double the first ones at the low tiers, a third more at the high.)
-objectiveSet("overlord", "outposts", "uw", "ul", { nil, "Elune's Reach" }, "guild outposts",
+-- Overlord: Kalimdor's guild outposts and forts (guild keeps) only (which
+-- ones: Captures.REGION; Shobek'Aran among them).
+-- (Their counts: about double the first ones at the low tiers, a third
+-- more at the high.)
+objectiveSet("kalimdor", "outposts", "uw", "ul", { nil, "Elune's Reach" }, "guild outposts",
     { "spell_holy_elunesgrace", "Spell_Nature_StarFall" },
     {},
-    { { "copper", 20, 35 }, { "silver", 60, 75 }, { "gold", 100, 150 }, { "moonstone", 195, 300 } })
-objectiveSet("overlord", "forts", "fw", "fl", { nil, "Ancient of War" }, "forts",
+    { { "copper", 20, 35 }, { "silver", 60, 75 }, { "gold", 100, 150 }, { "moonstone", 195, 300 } },
+    nil,
+    function(n) return ("Be inside %d of Kalimdor's Outposts as they're captured."):format(n) end)
+objectiveSet("kalimdor", "forts", "fw", "fl", { nil, "Ancient of War" }, "forts",
     { "inv_misc_tournaments_symbol_nightelf", "INV_Misc_Tournaments_banner_Nightelf" },
     {},
-    { { "copper", 10, 50 }, { "silver", 30, 100 }, { "gold", 55, 200 }, { "moonstone", 105, 400 } })
+    { { "copper", 10, 50 }, { "silver", 30, 100 }, { "gold", 55, 200 }, { "moonstone", 105, 400 } },
+    nil,
+    function(n) return ("Be inside %d of Kalimdor's Guild Keeps as they're captured."):format(n) end)
+-- (only Overlord can see them taken - capture points, outposts, forts:
+-- `requires` puts a note on their cards and tooltips, Badges.Needs. Not
+-- Total Victory: a groupmate with Overlord can tell it, TV.)
+local NEEDS_OVERLORD = { captures = true, support = true, outposts = true, forts = true }
+for _, b in ipairs(Badges.LIST) do
+    if NEEDS_OVERLORD[b.series] then b.requires = "Overlord" end
+end
 -- Leaderboard ("placement"): 1st, 2nd or 3rd on a week's final Horde kills
 -- board (ties share the place). Each guildie's client claims its own, a day
 -- after the reset, once late counts are in.
 -- (Copper first, as everywhere; the id is the place: lb1 = 1st = Gold)
 for _, t in ipairs({ { "copper", 3, 10 }, { "silver", 2, 15 }, { "gold", 1, 25 } }) do
     Badges.LIST[#Badges.LIST + 1] = {
-        id = "lb" .. t[2], cat = "ashenvale", kind = "placement", tier = t[1], place = t[2], points = t[3], goal = 1,
+        id = "lb" .. t[2], cat = "kalimdor", kind = "placement", tier = t[1], place = t[2], points = t[3], goal = 1,
+        lead = true,       -- (first of its page's badges not earned yet)
         name = "Chosen of Elune (Weekly)", icon = { "spell_nature_moonglow" },
         desc = ("Place %s on the weekly Horde kills leaderboard."):format(({ "first", "second", "third" })[t[2]]),
     }
@@ -234,12 +243,12 @@ local RITUAL = {
     -- (id "hp": it was Hunting Party; what was earned of it carries over)
     { id = "hp", cat = "wyldhunt", kind = "granted", stack = true, points = 10, noInfo = true,
       name = "Cadre of Vengeance", icon = { "Ability_Tracking", "Ability_Hunter_BeastCall" },
-      desc = "Aid another Moonwarden in their Wyld Hunt." },
+      desc = "Aid another Moonwarden in the successful completion of their Wyld Hunt." },
     -- Not automatic: officers are promoted through Huntress, so holding the
     -- rank (or one above) only files a request (autoRequest); an officer
     -- approves it in Approvals before it counts.
     { id = "hr", cat = "wyldhunt", kind = "granted", rank = "Huntress", autoRequest = "rank", points = 100, noInfo = true,
-      name = "Huntress", icon = { "achievement_boss_councilsentinel", "Ability_Mount_WhiteTiger" },
+      name = "Vengeance Abides", icon = { "achievement_boss_councilsentinel", "Ability_Mount_WhiteTiger" },
       desc = "Earn the rank of Huntress." },
 }
 ---------------------------------------------------------------------------
@@ -360,9 +369,9 @@ function Badges.Resolve(e)
 end
 
 -- Moonstone for the kills (past Gold: 100,000 in all).
-Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "ashenvale", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
+Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime", tier = "moonstone", goal = 100000, points = 500,
     name = "Wrath of the Kaldorei", icon = LIFETIME_ICON,
-    desc = "Kill or assist in killing 100,000 Horde in Ashenvale or Stonetalon." }
+    desc = "Kill or assist in killing 100,000 Horde in Ashenvale, Mount Hyjal or Stonetalon." }
 
 ---------------------------------------------------------------------------
 -- TIER TRACKS: one card for all the tiers of a badge
@@ -428,6 +437,12 @@ end
 local byId = {}
 for _, b in ipairs(Badges.LIST) do byId[b.id] = b end
 function Badges.Get(id) return byId[id] end
+
+-- The addon a badge needs, as its card and tooltip say it (in gold, under
+-- its progress), or nil (`requires`).
+function Badges.Needs(b)
+    return b.requires and ("Requires the %s addon."):format(b.requires) or nil
+end
 
 -- Is a category switched off for now ("coming soon")?
 local soonCats
@@ -1030,6 +1045,21 @@ local others = {}          -- key -> { weeks, at, parts = {...} }
 local asked = {}           -- key -> time I asked
 local answered = {}        -- key -> time I answered
 local ASK_GAP, ANSWER_GAP = 10, 10
+-- What each guildie last sent (weeks, Showcase, order), kept between
+-- sessions, so theirs still show while they're offline: db.badgeCache,
+-- key -> { weeks, showcase, order, at = time() }. Not heard from in
+-- CACHE_DAYS: dropped.
+local CACHE_DAYS = 180
+local function cache()
+    ns.db.badgeCache = ns.db.badgeCache or {}
+    return ns.db.badgeCache
+end
+local function cached(key)
+    local c = cache()
+    c[key] = c[key] or {}
+    c[key].at = time()
+    return c[key]
+end
 
 -- Their weeks as far as I know: what they sent, and the Leaderboard's
 -- counts for them (this week and last), the higher of each.
@@ -1054,10 +1084,17 @@ function Badges.Of(key) return Badges.Compute(Badges.WeeksOf(key), manualFor(key
 -- Have they answered? (nil: never; else the time)
 function Badges.HeardFrom(key) return others[key] and others[key].at end
 
+-- When they last answered, any session (time(); nil: never).
+function Badges.SavedAt(key)
+    local c = ns.db and ns.db.badgeCache and ns.db.badgeCache[key]
+    return c and c.at
+end
+
+-- (offline: no whisper - the game would answer "No player named ...")
 function Badges.Request(key)
     if not key or key == ns.meKey then return end
     local m = ns.Roster and ns.Roster.Get(key)
-    local to = m and m.address
+    local to = m and m.online and m.address
     if not to then return end
     local now = ns.now()
     if asked[key] and now - asked[key] < ASK_GAP then return end
@@ -1120,6 +1157,8 @@ local function onBV(f, sender, key)
         if byId[all[i]] and #order < 1000 then order[#order + 1] = all[i] end
     end
     layouts[key] = { showcase = showcase, order = order }
+    local c = cached(key)
+    c.showcase, c.order = showcase, order
     ns.fire("BADGES", key)
 end
 
@@ -1133,6 +1172,7 @@ local function onBW(f, sender, key)
     end
     local old = layouts[key]
     layouts[key] = { showcase = showcase, order = old and old.order }
+    if ns.db and ns.db.badgeCache and ns.db.badgeCache[key] then ns.db.badgeCache[key].showcase = showcase end
     ns.fire("BADGES", key)
 end
 
@@ -1155,12 +1195,33 @@ local function onBS(f, sender, key)
     for _ in pairs(o.parts.got) do done = done + 1 end
     if done >= parts then
         o.weeks, o.at, o.parts = weeks, ns.now(), nil
+        cached(key).weeks = weeks
         ns.fire("BADGES", key)
+    end
+end
+
+-- Last session's answers, as far as they go (not answers this session:
+-- HeardFrom stays nil until they answer again).
+local function loadCache()
+    local c, old = cache(), time() - CACHE_DAYS * 86400
+    for key, e in pairs(c) do
+        if type(e) ~= "table" or (tonumber(e.at) or 0) < old then
+            c[key] = nil
+        else
+            if type(e.weeks) == "table" and not others[key] then others[key] = { weeks = e.weeks } end
+            if type(e.showcase) == "table" and not layouts[key] then
+                local showcase, order = {}, {}
+                for i = 1, Badges.SHOWCASE_N do local id = e.showcase[i]; showcase[i] = (id and byId[id]) and id or false end
+                for _, id in ipairs(type(e.order) == "table" and e.order or {}) do if byId[id] then order[#order + 1] = id end end
+                layouts[key] = { showcase = showcase, order = order }
+            end
+        end
     end
 end
 
 ns.onLogin(function()
     freshStart()
+    loadCache()
     ns.Comm.handlers.BQ = function(f, sender, key) answer(sender, key) end
     ns.Comm.handlers.BS = onBS
     ns.Comm.handlers.BV = onBV

@@ -417,6 +417,24 @@ end
 
 function RT.IsShown(owner) return isUp(owner) and true or false end
 
+-- totalRP3's hide-on-modifier key, pressed while ours is up: ours goes
+-- first. (totalRP3's own handler swaps its tooltip for the game's with
+-- GameTooltip:SetUnit(its unit) - ours has none, so that call errors. With
+-- ours hidden, it does nothing; a dot's next hover tick shows our plain
+-- tooltip, as totalRP3 would. totalRP3 only registers for the key at login
+-- (its OnEnable, startModules); this frame registers as the file loads,
+-- earlier, so it hears the key first.)
+local modWatch = CreateFrame("Frame")
+modWatch:RegisterEvent("MODIFIER_STATE_CHANGED")
+modWatch:SetScript("OnEvent", function()
+    local tt = TRP3_CharacterTooltip
+    if not (shown and shown.drawn and tt and tt:IsShown() and not tt.target) then return end
+    local ok, yes = pcall(allowed)
+    if ok and yes then return end
+    shown.drawn = false
+    tt:Hide()
+end)
+
 -- A profile arrived for the dot `owner` shows in its own tooltip: the next
 -- hover tick should try us again.
 function RT.Ready(owner)
