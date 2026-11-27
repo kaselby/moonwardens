@@ -217,16 +217,16 @@ for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 3, 100 }, { "gold", 9, 200
     }
 end
 -- Holding the line: inside one of Splintertree Post's two approaches
--- (Overlord's prerequisites for it) as it falls (Captures.lua, series
--- "support"), in tiers by how many times in all ("selflifetime"). The
+-- (Overlord's prerequisites for it) as it falls for a Total Victory
+-- (Captures.lua, series "support"), in tiers by how many times in all ("selflifetime"). The
 -- first keeps the id it had alone ("dp"), so one counted before still does.
 for i, t in ipairs({ { "copper", 1, 25 }, { "silver", 3, 50 }, { "gold", 6, 100 }, { "moonstone", 10, 200 } }) do
     Badges.LIST[#Badges.LIST + 1] = {
         id = i == 1 and "dp" or ("dp" .. i), cat = "kalimdor", kind = "selflifetime", series = "support",
         tier = t[1], goal = t[2], points = t[3], unit = "Splintertree Post captures held",
         name = "I'm Doing My Part!", icon = { "ability_warrior_rallyingcry", "INV_BannerPVP_02" },
-        desc = t[2] == 1 and "Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured."
-            or ("Be inside Dor'Danil Barrow Den or Raynewood Retreat when Splintertree Post is captured, %d times."):format(t[2]),
+        desc = t[2] == 1 and "Be inside Dor'Danil Barrow Den or Raynewood Retreat when all of Ashenvale is taken on Overlord."
+            or ("Be inside Dor'Danil Barrow Den or Raynewood Retreat when all of Ashenvale is taken on Overlord, %d times."):format(t[2]),
     }
 end
 -- Kalimdor Defense: the Ashenvale front's capture points (no other
