@@ -469,6 +469,11 @@ local function layoutHeader(cd, columnInfo)
     if not badgeHeader then
         badgeHeader = CreateFrame("Button", nil, cd, "ColumnDisplayButtonTemplate")
         badgeHeader:SetText(BADGE_TITLE)
+        -- Only a heading: not clickable (the template's click sorts the list
+        -- by the heading's column - this one has none, and the game's sort
+        -- errors on it), no highlight. The game's own headings sort as ever.
+        badgeHeader:SetScript("OnClick", nil)
+        badgeHeader:EnableMouse(false)
     end
     -- The column: the icons, or the title if that's wider.
     local fs = badgeHeader.GetFontString and badgeHeader:GetFontString()
