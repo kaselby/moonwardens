@@ -7,9 +7,10 @@
 --   forts     fortresses (guild keeps) likewise;
 --   ashenvale_outposts  Ashenvale's own outposts (Shobek'Aran, Lesi's Bear
 --             Cave): counted here as well as in outposts;
---   support   Splintertree Post taken for our side while I was inside one
---             of its two approaches, Dor'Danil Barrow Den or Raynewood
---             Retreat (I'm Doing My Part!);
+--   support   Splintertree Post taken for a Total Victory (below) while I
+--             was inside one of its two approaches, Dor'Danil Barrow Den or
+--             Raynewood Retreat (I'm Doing My Part!) - mine alone; a capture
+--             of it lost straight after is no victory, and doesn't count;
 --   victory   TOTAL VICTORY on the Ashenvale front (Tor ilisar'thera'nal!):
 --             I'm in Ashenvale, and in the group (party or raid) of those
 --             inside the enemy's capital (Splintertree Post, the last
@@ -58,7 +59,7 @@ local AWAY_EVERY = 10       -- off the war maps: look this often (s)
 -- least Overlord's hold less Attack's 60 s (platinum): capture points
 -- 120 - 60, outposts 300 - 60, guild keeps 600 - 60. Each window is half
 -- the quickest real retake (two such holds back to back), or less.
-local SAME_CAPTURE = { captures = 60, support = 60,
+local SAME_CAPTURE = { captures = 60, support = 1800,   -- (support: one per Total Victory, as victory)
                        outposts = 240, ashenvale_outposts = 240, shobekaran = 240, lesi_cave = 240,
                        forts = 540,
                        leaders = 3600,   -- (Leaders.lua: each kill its own id, by spawn - a report late is the same)
@@ -72,7 +73,8 @@ local ASHENVALE_OUTPOSTS = { ashenvale = true, lesi_bear_cave = true }   -- (Sho
 -- badge now, but are still counted, should one come back).
 local SITE_SERIES = { ashenvale = "shobekaran", lesi_bear_cave = "lesi_cave" }
 -- Splintertree Post, and the objectives that hold its approaches (its
--- prerequisites on Overlord's map): inside one as it falls, "support".
+-- prerequisites on Overlord's map): inside one as it falls for a Total
+-- Victory, "support" (counted with the victory, below).
 local SPLINTERTREE = "ash_splintertree"
 local APPROACHES = { "ash_dor_danil", "ash_raynewood" }
 -- The outposts and forts the badges count: Kalimdor's (Overlord's site
@@ -250,15 +252,7 @@ local function tick()
                 if wasInside(key, ct) then
                     credit("captures", zone.id, zone.name, ct, "Objective taken, with you in it:")
                 end
-                -- (Splintertree Post: or holding one of its approaches)
-                if zone.id == SPLINTERTREE then
-                    for _, id in ipairs(APPROACHES) do
-                        if wasInside("zone:" .. id, ct) then
-                            credit("support", zone.id, zone.name, ct, "I'm Doing My Part! You held the line as it fell:")
-                            break
-                        end
-                    end
-                end
+                -- (Splintertree Post's approaches held: counted with its Total Victory, onVictory)
             end
         end
     end
@@ -403,8 +397,21 @@ local function onVictory(_, frontId, winner, ts)
     local ct = capital and tonumber(capital.capturedTime) or nil
     local name = capital and capital.name or capId
     local grouped = ns.try(IsInGroup) == true
+    -- Holding the line (I'm Doing My Part!): I was inside one of its
+    -- approaches as it fell. Mine alone (no group's, no one's word).
+    local held = ""
+    if capId == SPLINTERTREE then
+        for _, id in ipairs(APPROACHES) do
+            if insideNear("zone:" .. id, ct, ts) then
+                if credit("support", capId, name, ct or ts, "I'm Doing My Part! You held the line as it fell:") then
+                    held = "; held the line (I'm Doing My Part!)"
+                end
+                break
+            end
+        end
+    end
     if not inAshenvale() then
-        logVictory(ts, "not counted: not in Ashenvale")
+        logVictory(ts, "not counted: not in Ashenvale" .. held)
         return
     end
     local ours = insideNear("zone:" .. capId, ct, ts)
@@ -420,12 +427,12 @@ local function onVictory(_, frontId, winner, ts)
     end
     if not ours then
         logVictory(ts, (grouped and "not counted: no one in my group was seen inside %s as it fell"
-            or "not counted: not inside %s as it fell (solo)"):format(name))
+            or "not counted: not inside %s as it fell (solo)"):format(name) .. held)
         return
     end
     if not credit("victory", frontId, "Ashenvale", ts, VICTORY_WHAT) then return end   -- (counted already: told already)
     logVictory(ts, ("counted%s%s"):format(grouped and " (group)" or " (solo)",
-        late > FRESH_FOR and (", heard %d s late"):format(late) or ""))
+        late > FRESH_FOR and (", heard %d s late"):format(late) or "") .. held)
     -- Tell the group, once: its guildies without Overlord count it too.
     if grouped then ns.Comm.Send({ "TV", ns.Comm.PROTO, frontId, ts }, IsInRaid() and "RAID" or "PARTY") end
 end
@@ -452,11 +459,11 @@ ns.tests.victory = { help = "what became of the last Total Victories Overlord re
     end
 end }
 
-local hooked = false
+local hooked                 -- (the Overlord.Zones hooked)
 local function hookVictory()
     local O = overlord()
-    if hooked or not (O and O.Zones and type(O.Zones.SetVictoryCooldown) == "function") then return end
-    hooked = true
+    if not (O and O.Zones and type(O.Zones.SetVictoryCooldown) == "function") or hooked == O.Zones then return end
+    hooked = O.Zones
     -- (Overlord is an addon: hooking it touches nothing of the game's)
     hooksecurefunc(O.Zones, "SetVictoryCooldown", function(...) pcall(onVictory, ...) end)
 end

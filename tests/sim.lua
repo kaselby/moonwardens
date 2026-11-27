@@ -822,26 +822,51 @@ do
 end
 
 -- I'm Doing My Part!: inside Dor'Danil Barrow Den or Raynewood Retreat as
--- Splintertree Post falls (a small Overlord, faked)
+-- Splintertree Post falls for a Total Victory (Overlord's SetVictoryCooldown;
+-- a small Overlord, faked). A capture of it lost straight after (no
+-- victory): nothing.
 do
     local keep = ns.db.objectiveCaptures
     ns.db.objectiveCaptures = {}
     local inZone
     local st = { id = "ash_splintertree", name = "Splintertree Post", status = "held", owner = "Horde" }
     local dd = { id = "ash_dor_danil", name = "Dor'Danil Barrow Den", status = "captured", owner = "Alliance", capturedTime = 1 }
-    _G.Overlord = {
-        PlayerFaction = "Alliance",
-        Fronts = { activeFrontId = "ashenvale", ResolveFrontByMapID = function() return {} end },
-        Zones = { GetCurrentPlayerZone = function() return inZone end },
+    local O = {
+        PlayerFaction = "Alliance", L = {},
+        Fronts = { activeFrontId = "ashenvale", ResolveFrontByMapID = function() return {} end,
+            GetEnemyCapitalId = function() return "ash_splintertree" end, GetMapID = function() return 1440 end },
+        Zones = { GetCurrentPlayerZone = function() return inZone end, SetVictoryCooldown = function() end,
+            GetMapAspectRatio = function() return 1 end },
         ZoneDatabase = { st, dd },
     }
+    _G.Overlord = O
+    W.fire("ADDON_LOADED", "Overlord")
+    local function held() local _, n = ns.Captures.Weeks("support"); return n end
+    local function fall()
+        local t = time()
+        st.status, st.owner, st.capturedTime = "captured", "Alliance", t
+        return t
+    end
+    -- 1. Inside Dor'Danil as Splintertree falls, then lost straight after: no victory, nothing.
     inZone = dd
     W.advance(3)                                          -- (inside Dor'Danil; Splintertree seen, not ours)
-    st.status, st.owner, st.capturedTime = "captured", "Alliance", time()
+    fall()
     W.advance(2)
-    local _, n = ns.Captures.Weeks("support")
+    st.status, st.owner = "held", "Horde"
+    W.advance(60)
     local _, caps = ns.Captures.Weeks("captures")
-    check(n == 1 and caps == 0, "I'm Doing My Part!: held Dor'Danil as Splintertree fell (not a capture of it)")
+    check(held() == 0 and caps == 0, "I'm Doing My Part!: Splintertree taken and lost, no Total Victory: not counted")
+    -- 2. Taken again, me in Dor'Danil, and Overlord calls the Total Victory a minute on: counted.
+    W.advance(60)
+    local ct = fall()
+    W.advance(2)
+    inZone = nil
+    W.advance(60)
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct)
+    W.advance(1)
+    local _, vic = ns.Captures.Weeks("victory")
+    check(held() == 1 and vic == 0, "I'm Doing My Part!: held Dor'Danil as it fell for a Total Victory (not inside it: no Tor ilisar'thera'nal!)")
+    check((ns.db.victoryLog[#ns.db.victoryLog].result or ""):find("I'm Doing My Part!", 1, true), "/mw test victory says the line was held")
     check(ns.Badges.Needs(ns.Badges.Get("dp")) and ns.Badges.Get("dp").cat == "kalimdor", "I'm Doing My Part! on Kalimdor Defense, needs Overlord")
     do
         local B = ns.Badges
@@ -851,25 +876,28 @@ do
         local m = B.Mine().badges
         check(m.dp.times == 1 and m.dp2.times == 0 and m.dp2.value == 1, "I'm Doing My Part! once: copper, silver 1/3")
     end
-    -- (the same capture re-stamped a few seconds on, as a guildmate's sync of it does: once)
-    st.capturedTime = st.capturedTime + 3; W.advance(2)
-    _, n = ns.Captures.Weeks("support")
-    check(n == 1, "a capture re-stamped by a guildmate's sync counts once")
-    -- (elsewhere when it falls again: nothing)
-    inZone = nil
-    st.status, st.owner = "held", "Horde"; W.advance(2)
-    -- (four minutes on: a real retake, with me inside neither)
-    W.advance(240)
-    st.status, st.owner, st.capturedTime = "captured", "Alliance", time(); W.advance(2)
-    _, n = ns.Captures.Weeks("support")
-    check(n == 1, "not inside either approach: doesn't count")
-    -- (lost and retaken as fast as Attack allows, 60 s each, me in Dor'Danil: a capture of its own)
-    inZone = dd
+    -- (the same victory recorded again, re-stamped a few seconds on: once)
+    for _, d in ipairs({ 0, 3, 5 }) do O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct + d) end
+    W.advance(1)
+    check(held() == 1, "the same victory recorded again: counts once")
+    -- 3. The next victory, me inside neither approach: nothing.
+    W.advance(1900, 1)
+    local ct2 = fall()
     W.advance(2)
-    st.status, st.owner = "held", "Horde"; W.advance(60); W.advance(58)
-    st.status, st.owner, st.capturedTime = "captured", "Alliance", time(); W.advance(2)
-    _, n = ns.Captures.Weeks("support")
-    check(n == 2, "retaken 2 min on (Attack both ways): counts again")
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct2)
+    W.advance(1)
+    check(held() == 1, "not inside either approach: doesn't count")
+    -- 4. The one after, me in Dor'Danil again: counts again.
+    W.advance(1900, 1)
+    st.status, st.owner = "held", "Horde"
+    inZone = dd
+    W.advance(3)
+    local ct3 = fall()
+    W.advance(2)
+    O.Zones:SetVictoryCooldown("ashenvale", "Alliance", ct3)
+    W.advance(1)
+    check(held() == 2, "the next Total Victory, holding the line again: counts again")
+    inZone = nil
     _G.Overlord = nil
     ns.db.objectiveCaptures = keep
 end
