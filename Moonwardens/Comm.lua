@@ -190,7 +190,7 @@ ns.onLogin(function()
     ns.after(10, announce, "version announce")
 end, "version")
 
-ns.slash.comm = { help = "message counters", fn = function()
+ns.slash.comm = { dev = true, help = "message counters", fn = function()
     local s = Comm.stats
     ns.print(("sent %d, received %d, ignored (not in guild) %d, too long %d, queued %d"):format(
         s.sent, s.recv, s.ignored, s.dropped, #queue))

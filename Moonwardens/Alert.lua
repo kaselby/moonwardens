@@ -180,8 +180,16 @@ local function onA(f, sender, key)
     current = { id = id, key = key, name = m.name or sender, address = m.address or ns.address(sender),
         classFile = m.classFile, map = map, x = x, y = y, at = ns.now(), layer = tonumber(f[7]) or 0,
         responded = responded, respondedAt = respondedAt }
-    local mine = ns.Layer and ns.Layer.Mine(map) or 0
-    current.otherLayer = current.layer ~= 0 and mine ~= 0 and current.layer ~= mine
+    if ns.Layer and ns.Layer.Private and ns.Layer.Private() then
+        -- No shared layer numbers on this build: only what the evidence proves.
+        local g = ns.Position.Get(key)
+        local rel, sure
+        if g then rel, sure = ns.Position.Relation(g) end
+        current.otherLayer = rel == "other" and sure == true
+    else
+        local mine = ns.Layer and ns.Layer.Mine(map) or 0
+        current.otherLayer = current.layer ~= 0 and mine ~= 0 and current.layer ~= mine
+    end
 
     local _, px, py = ns.Position.ReadMine()
     local _, dx, dy = Alert.Yards(map, px, py, x, y)

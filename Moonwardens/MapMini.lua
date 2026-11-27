@@ -21,6 +21,7 @@ local dots, used = {}, 0
 local sizes = {}            -- map -> { w, h } in yards, or { fail = time }
 local acc, hoverAcc = 0, 0
 local tipKey                -- hovered guildies in the tooltip we own, or nil
+local tipTrp                -- true while that tooltip is totalRP3's (RosterTRP.lua)
 
 ---------------------------------------------------------------------------
 -- Hover: guildies join the minimap's own tooltip, the way party members do.
@@ -51,15 +52,39 @@ local function hovered()
     return ns.SortHits(ns.DotsUnderCursor(dots, used, HOVER_RADIUS))
 end
 
+-- Group members who are guildies with the addon (the game draws their
+-- dots), where the game puts them: { g, dx, dy } from the minimap's centre.
+local groupSpots = {}
+
+-- Those of them under the cursor.
+local function groupHovered()
+    if #groupSpots == 0 or not holder or not overMinimap() then return {} end
+    local cx, cy = GetCursorPosition()
+    local s = holder:GetEffectiveScale()
+    local hx, hy = holder:GetCenter()
+    if not (hx and s and s > 0) then return {} end
+    cx, cy = cx / s, cy / s
+    local out = {}
+    for _, p in ipairs(groupSpots) do
+        local dx, dy = cx - (hx + p.dx), cy - (hy + p.dy)
+        if dx * dx + dy * dy <= HOVER_RADIUS * HOVER_RADIUS then out[#out + 1] = { d = { g = p.g } } end
+    end
+    return out
+end
+
 -- Each guildie as in 0.5.1, the name a notch bigger under the game's lines
 -- (shared with the world map: ns.AddGuildieLines in MapWorld.lua).
 local function addLines(tt, hits) ns.AddGuildieLines(tt, hits) end
 
--- The game's minimap tooltip is being built: add our guildies to it.
+-- The game's minimap tooltip is being built: add our guildies to it. If
+-- it only lists group members who are guildies with the addon, it becomes
+-- ours instead (ns.GroupTooltip, MapWorld.lua).
 local function onMinimapTooltip(tt)
     if tt ~= GameTooltip then return end
-    local hits = hovered()
-    if #hits > 0 then addLines(tt, hits) end
+    local hits, ghits = hovered(), groupHovered()
+    if #ghits > 0 and ns.GroupTooltip(tt, ghits, hits) then return end
+    for _, h in ipairs(ghits) do hits[#hits + 1] = h end
+    if #hits > 0 then addLines(tt, ns.SortHits(hits)) end
 end
 
 -- Does the game have minimap lines of its own under the cursor right now?
@@ -75,30 +100,46 @@ end
 -- Every hover tick: own GameTooltip only while the game isn't using it.
 local function updateHover()
     local shown, owner = GameTooltip:IsShown(), GameTooltip:GetOwner()
+    local RT = ns.RosterTRP
     if shown and owner ~= holder then
-        tipKey = nil                -- the game's tooltip (or another's): ours ride along in it
+        if tipKey and RT then RT.Hide(holder) end
+        tipKey, tipTrp = nil, nil   -- the game's tooltip (or another's): ours ride along in it
         return
     end
     local hits = hovered()
     if #hits == 0 then
         if tipKey and owner == holder then GameTooltip:Hide() end
-        tipKey = nil
+        if tipKey and RT then RT.Hide(holder) end
+        tipKey, tipTrp = nil, nil
         return
     end
     -- Something of the game's is under the cursor too (a flight master, a
-    -- node): build its tooltip the way the game does, and our post-call adds
-    -- the guildies under its lines. Rebuilt each tick, as the game does.
+    -- node, a party member): build its tooltip the way the game does, and our
+    -- post-call adds the guildies under its lines. Rebuilt each tick, as the
+    -- game does. (Never totalRP3's tooltip here: the shared one holds them all.)
     if GameTooltip.SetMinimapMouseover and gameHasLines() then
+        if RT then RT.Hide(holder) end
         GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
         local ok = pcall(GameTooltip.SetMinimapMouseover, GameTooltip)
         if ok then
             GameTooltip:Show()
-            tipKey = "game"
+            tipKey, tipTrp = "game", nil
             return
         end
     end
     local setKey = ns.HitsKey(hits)
-    if setKey == tipKey and shown and owner == holder then return end
+    if setKey == tipKey then
+        if tipTrp and RT and RT.IsShown(holder) then return end
+        if not tipTrp and shown and owner == holder and not (RT and RT.Ready(holder)) then return end
+    end
+    -- One guildie alone with a totalRP3 profile: totalRP3's own tooltip.
+    if #hits == 1 and RT and RT.ShowDot(holder, hits[1].d.g) then
+        if GameTooltip:GetOwner() == holder then GameTooltip:Hide() end
+        tipKey, tipTrp = setKey, true
+        return
+    end
+    if tipTrp and RT then RT.Hide(holder) end
+    tipTrp = nil
     GameTooltip:SetOwner(holder, "ANCHOR_CURSOR")
     addLines(GameTooltip, hits)
     GameTooltip:Show()
@@ -228,6 +269,16 @@ function MapMini.Update()
     local facing = rotating() and ns.try(GetPlayerFacing) or nil
     if facing and type(facing) ~= "number" then facing = nil end
     local limit = half - DOT_SIZE / 2 - 1
+    -- (group guildies: where the game draws them, for their tooltip)
+    local spots = {}
+    for _, p in ipairs(ns.GroupPositions(map)) do
+        local g = ns.GroupGuildie(p.unit)
+        if g then
+            local dx, dy = MapMini.Offset(p.x, p.y, px, py, w, h, ppy, facing)
+            if dx * dx + dy * dy <= limit * limit then spots[#spots + 1] = { g = g, dx = dx, dy = dy } end
+        end
+    end
+    groupSpots = spots
     local n = 0
     for _, g in pairs(ns.Position.All()) do
         if g.map == map then

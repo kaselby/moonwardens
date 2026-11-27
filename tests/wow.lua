@@ -26,7 +26,10 @@ Widget.__index = function(t, k)
 end
 function Widget:SetScript(k, fn) self._scripts[k] = fn end
 function Widget:GetScript(k) return self._scripts[k] end
-function Widget:HookScript(k, fn) self._scripts[k] = fn end
+function Widget:HookScript(k, fn)          -- (after what's there, as the game's)
+    local old = self._scripts[k]
+    self._scripts[k] = old and function(...) old(...); return fn(...) end or fn
+end
 function Widget:Show() self._shown = true; if self._scripts.OnShow then self._scripts.OnShow(self) end end
 function Widget:Hide() self._shown = false end
 function Widget:IsShown() return self._shown ~= false end
@@ -45,6 +48,7 @@ function Widget:CreateFontString() return W.new("FontString") end
 function Widget:CreateMaskTexture() return W.new("MaskTexture") end
 function Widget:GetWidth() return self._w or 100 end
 function Widget:GetHeight() return self._h or 100 end
+function Widget:GetSize() return self._w or 100, self._h or 100 end
 function Widget:SetSize(w, h) self._w, self._h = w, h end
 function Widget:SetWidth(w) self._w = w end
 function Widget:SetHeight(h) self._h = h end
@@ -267,6 +271,7 @@ W.raid = false
 W.invites, W.sounds, W.converted, W.accepted, W.popupsHidden = {}, {}, 0, 0, {}
 function GetNumGroupMembers() return #W.group > 0 and #W.group + 1 or 0 end
 function IsInRaid() return W.raid end
+function IsInGroup() return #W.group > 0 end
 local oldUnitName = UnitName
 function UnitName(u)
     local i = u:match("^party(%d)$") or u:match("^raid(%d+)$")

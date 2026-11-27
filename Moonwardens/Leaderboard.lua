@@ -1,5 +1,5 @@
--- Leaderboard: Horde players killed in Ashenvale and at Stonetalon Peak, per
--- week, shared through the guild.
+-- Leaderboard: Horde players killed in Ashenvale, Mount Hyjal and at
+-- Stonetalon Peak, per week, shared through the guild.
 -- Any kill counts, honorable or not (Krylea, 11-09): grey-level Horde too.
 -- Weeks run on the game's Tuesday reset, the same weeks and messages as 0.5,
 -- so every version shares one board. Sunday weeks (Krylea, 11-15) are on hold
@@ -15,6 +15,7 @@ ns.Leaderboard = LB
 
 local ASHENVALE = 1440
 local STONETALON = 1442
+local HYJAL = 2482               -- (this realm's Mount Hyjal map)
 local PEAK = "Stonetalon Peak"   -- the subzone; the rest of Stonetalon doesn't count
 local WEEK = 604800
 -- A known reset: Tuesday 2024-01-02 15:00 UTC (US weekly reset).
@@ -45,6 +46,12 @@ end
 function LB.Week()
     return math.floor((LB.NextReset() - ANCHOR) / WEEK + 0.5) - 1
 end
+
+-- When week `week` began (server time).
+function LB.WeekStart(week) return ANCHOR + week * WEEK end
+
+-- The week a moment `t` falls in.
+function LB.WeekOf(t) return math.floor((t - ANCHOR) / WEEK) end
 
 local function board()
     return ns.db.board
@@ -90,13 +97,15 @@ end
 ---------------------------------------------------------------------------
 -- Counting my kills
 ---------------------------------------------------------------------------
--- Ashenvale, or the Stonetalon Peak subzone of Stonetalon Mountains.
+-- Ashenvale, Mount Hyjal, or the Stonetalon Peak subzone of Stonetalon
+-- Mountains.
 local function counts()
     local inside, kind = ns.try(IsInInstance)
     if inside == true and kind ~= "none" then return false end
     local map = ns.try(C_Map.GetBestMapForUnit, "player")
     local zone = ns.try(GetZoneText)
     if map == ASHENVALE or zone == "Ashenvale" then return true end
+    if map == HYJAL or zone == "Mount Hyjal" then return true end
     if map == STONETALON or zone == "Stonetalon Mountains" then
         return ns.try(GetSubZoneText) == PEAK or ns.try(GetMinimapZoneText) == PEAK
     end
@@ -202,7 +211,7 @@ end
 
 function LB.PartyKill(attacker, victim)
     if type(victim) ~= "string" or not ns.readable(victim) then return end
-    -- Only players. In open-world Ashenvale and Stonetalon every player who
+    -- Only players. In open-world Ashenvale, Hyjal and Stonetalon every player who
     -- can die to us is Horde (no duels to the death, no free-for-all areas).
     if victim:sub(1, 7) ~= "Player-" then return end
     kill("p", victim, attacker)
@@ -335,7 +344,7 @@ end
 ---------------------------------------------------------------------------
 -- Page
 ---------------------------------------------------------------------------
-local ROWS = 14
+local ROWS = 18             -- at most; fewer when the page is shorter
 local ROW_H = 20
 local RANK_COLOR = { { 1, 0.82, 0 }, { 0.85, 0.85, 0.9 }, { 0.85, 0.55, 0.3 } }
 
@@ -364,9 +373,11 @@ local function build(f)
     local UI = ns.UI
     LB.page = f
     f.week = 0 -- 0 = this week, 1 = last week
-    f.title = UI.Text(f, "big", UI.GOLD, "LEFT"); f.title:SetPoint("TOPLEFT", 0, 0)
-    f.title:SetText("Horde Kills")
-    f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -22)
+    -- The heading: where it counts; under it, when it resets. (The Guild
+    -- Total: over the Kills column, below.)
+    f.sub = UI.Text(f, "small", UI.GREY, "LEFT"); f.sub:SetPoint("TOPLEFT", 0, -4)
+    f.reset = UI.Text(f, "small", UI.GREY, "LEFT"); f.reset:SetPoint("TOPLEFT", f.sub, "BOTTOMLEFT", 0, -3)
+    f.reset:SetHeight(14)                 -- (a line's height even when empty: the Guild Total sits on it)
 
     f.tabs = {}
     for i, label in ipairs({ "This week", "Last week" }) do
@@ -378,20 +389,47 @@ local function build(f)
         f.tabs[i] = b
     end
 
-    local y = -44
+    local y = -40                         -- (under the heading's two lines)
     local function col(text, x, w, justify)
         local h = UI.Text(f, nil, UI.GOLD, justify); h:SetPoint("TOPLEFT", x, y); h:SetWidth(w); h:SetText(text)
+        return h
     end
-    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT"); col("Kills", 440, 60, "RIGHT")
+    col("#", 0, 24, "RIGHT"); col("Name", 36, 200, "LEFT"); col("Level / class", 250, 150, "LEFT")
+    local kills = col("Kills", 440, 60, "RIGHT")
+    -- The Guild Total: on the Resets line, centred over the Kills heading
+    -- (on the word, at its box's right end - not the box). Placed as it's
+    -- filled in, by its width (refresh).
+    f.total = UI.Text(f, "small", UI.GREY, "LEFT")
+    f.killsMid = 440 + 60 - (ns.try(kills.GetStringWidth, kills) or 0) / 2
     local line = f:CreateTexture(nil, "ARTWORK"); line:SetColorTexture(0.35, 0.28, 0.08, 1)
     line:SetPoint("TOPLEFT", 0, y - 16); line:SetSize(508, 1)
 
+    -- Rows: hovering a guildie shows the guild roster's tooltip for them
+    -- (RosterLayer.lua: totalRP3's when it has their profile), right-click
+    -- the roster's menu (Menu.lua), as on the roster itself.
+    local function rowEnter(r)
+        local info = r.key and ns.Roster.ClubMember(r.key)
+        if info and ns.MemberTooltip then ns.MemberTooltip(r, info) end
+    end
+    local function rowLeave(r)
+        if ns.RosterTRP then ns.RosterTRP.Hide(r) end
+        if GameTooltip:GetOwner() == r then GameTooltip:Hide() end
+    end
     f.rows = {}
-    for i = 1, ROWS do
-        local r = CreateFrame("Frame", nil, f)
+    for i = 1, ns.UI.RowsFor(f, ROWS, ROW_H, -y + 20) do
+        local r = CreateFrame("Button", nil, f)
         r:SetSize(508, ROW_H)
         r:SetPoint("TOPLEFT", 0, y - 20 - (i - 1) * ROW_H)
+        r:RegisterForClicks("RightButtonUp")
+        r:SetScript("OnEnter", ns.guard(rowEnter, "leaderboard hover"))
+        r:SetScript("OnLeave", ns.guard(rowLeave, "leaderboard hover"))
+        r:SetScript("OnClick", ns.guard(function(self)
+            rowLeave(self)
+            if self.key and ns.OpenMemberMenu then ns.OpenMemberMenu(self.key) end
+        end, "leaderboard menu"))
+        r:SetScript("OnMouseWheel", function(_, delta) local h = f:GetScript("OnMouseWheel"); if h then h(f, delta) end end)
         r.hl = r:CreateTexture(nil, "BACKGROUND"); r.hl:SetAllPoints(); r.hl:SetColorTexture(1, 0.82, 0, 0.12)
+        local over = r:CreateTexture(nil, "HIGHLIGHT"); over:SetAllPoints(); over:SetColorTexture(1, 1, 1, 0.08); over:SetBlendMode("ADD")
         r.rank = UI.Text(r, nil, nil, "RIGHT"); r.rank:SetPoint("LEFT", 0, 0); r.rank:SetWidth(24)
         r.name = UI.Text(r, nil, nil, "LEFT"); r.name:SetPoint("LEFT", 36, 0); r.name:SetWidth(210)
         r.class = UI.Text(r, nil, UI.GREY, "LEFT"); r.class:SetPoint("LEFT", 250, 0); r.class:SetWidth(180)
@@ -403,10 +441,47 @@ local function build(f)
     f.offset = 0
     f:EnableMouseWheel(true)
     f:SetScript("OnMouseWheel", function(_, delta)
-        f.offset = math.max(0, math.min((f.count or 0) - ROWS, f.offset - delta * 3))
+        f.offset = math.max(0, math.min((f.count or 0) - #f.rows, f.offset - delta * 3))
         UI.Refresh()
     end)
+    -- The game's own scroll bar (MinimalScrollBar, as the guild roster's),
+    -- beside the rows; shown only when there are more rows than fit.
+    local okSB, sb = pcall(CreateFrame, "EventFrame", nil, f, "MinimalScrollBar")
+    if okSB and sb and sb.Init and sb.RegisterCallback and ScrollBarMixin and ScrollBarMixin.Event then
+        sb:SetPoint("TOPLEFT", f, "TOPLEFT", 516, y - 20)
+        sb:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 516, y - 20 - #f.rows * ROW_H)
+        sb:RegisterCallback(ScrollBarMixin.Event.OnScroll, function(_, pct)
+            if f.syncing then return end
+            local max = (f.count or 0) - #f.rows
+            if max <= 0 then return end
+            local o = math.max(0, math.min(max, math.floor(pct * max + 0.5)))
+            if o ~= f.offset then f.offset = o; UI.Refresh() end
+        end, f)
+        sb:Hide()
+        f.scrollBar = sb
+    end
     f.foot = UI.Text(f, "small", UI.GREY, "LEFT"); f.foot:SetPoint("BOTTOMLEFT", 0, 0); f.foot:SetWidth(508)
+
+    -- The empty column right of the board: coming soon.
+    f.soon = UI.Text(f, "big", UI.GREY, "CENTER")
+    f.soon:SetPoint("TOPLEFT", 548, y)
+    f.soon:SetPoint("BOTTOMRIGHT", 0, 20)
+    f.soon:SetText("Coming Soon")
+end
+
+-- The scroll bar follows the offset (wheel, week change, new rows).
+local function syncScrollBar(f)
+    local sb = f.scrollBar
+    if not sb then return end
+    local max = (f.count or 0) - #f.rows
+    if max <= 0 then sb:Hide(); return end
+    f.syncing = true
+    pcall(function()
+        sb:Init(#f.rows / f.count, 1 / max)
+        sb:SetScrollPercentage(f.offset / max, true)
+    end)
+    f.syncing = false
+    sb:Show()
 end
 
 local function refresh(f)
@@ -415,7 +490,8 @@ local function refresh(f)
     local week = cur - f.week
     local rows = LB.Rows(week)
     f.count = #rows
-    f.offset = math.max(0, math.min(f.offset or 0, #rows - ROWS))
+    f.offset = math.max(0, math.min(f.offset or 0, #rows - #f.rows))
+    syncScrollBar(f)
     for i, b in ipairs(f.tabs) do
         if i - 1 == f.week then b:LockHighlight() else b:UnlockHighlight() end
     end
@@ -423,11 +499,16 @@ local function refresh(f)
     for _, r in ipairs(rows) do total = total + r.c end
     local resetAt = LB.NextReset()
     local left = resetAt - (ns.try(GetServerTime) or time())
+    f.total:SetText(("Guild Total |cffffd100%s|r"):format(total))
+    local tw = ns.try(f.total.GetStringWidth, f.total) or 0
+    f.total:ClearAllPoints()
+    f.total:SetPoint("LEFT", f.reset, "LEFT", math.floor(f.killsMid - tw / 2 + 0.5), 0)
     if f.week == 0 then
-        f.sub:SetText(("Ashenvale and Stonetalon Peak  -  resets Tuesday  -  %s left  -  guild total |cffffd100%d|r"):format(
-            duration(left), total))
+        f.sub:SetText("Ashenvale, Mount Hyjal and Stonetalon Peak")
+        f.reset:SetText(("Resets Tuesday  -  %s left"):format(duration(left)))
     else
-        f.sub:SetText(("Final standings  -  guild total |cffffd100%d|r"):format(total))
+        f.sub:SetText("Final standings")
+        f.reset:SetText("")
     end
     for i, r in ipairs(f.rows) do
         local e = rows[i + f.offset]
@@ -435,8 +516,9 @@ local function refresh(f)
             local rank = i + f.offset
             local rc = RANK_COLOR[rank] or { 0.8, 0.8, 0.8 }
             r.rank:SetText(rank); r.rank:SetTextColor(rc[1], rc[2], rc[3])
-            local cr, cg, cb = ns.classColor(e.cls)
-            r.name:SetText(e.name .. (e.key == ns.meKey and " |cff9d9d9d(you)|r" or ""))
+            local cr, cg, cb = ns.RP.Color(e.key)          -- (RP name and colour when on)
+            if not cr then cr, cg, cb = ns.classColor(e.cls) end
+            r.name:SetText((ns.RP.Name(e.key) or e.name) .. (e.key == ns.meKey and " |cff9d9d9d(you)|r" or ""))
             r.name:SetTextColor(cr, cg, cb)
             local lc = {}
             if e.level then lc[#lc + 1] = e.level end
@@ -444,8 +526,10 @@ local function refresh(f)
             r.class:SetText(table.concat(lc, " "))
             r.n:SetText(e.c)
             r.hl:SetShown(e.key == ns.meKey)
+            r.key = e.key
             r:Show()
         else
+            r.key = nil
             r:Hide()
         end
     end
@@ -456,20 +540,24 @@ local function refresh(f)
     else
         f.empty:Hide()
     end
-    local foot = "Counts Horde killed in Ashenvale or at Stonetalon Peak by you or your group, honour or not. Weeks run from the Tuesday reset. Only members with the addon appear."
+    local foot = "Counts Horde killed by you or your group in Ashenvale, Mount Hyjal or Stonetalon Peak."
     if f.week == 0 then
         local last = LB.Rows(cur - 1)[1]
         if last then
-            local cr, cg, cb = ns.classColor(last.cls)
-            foot = foot .. (" Last week's winner: |cff%02x%02x%02x%s|r (%d)."):format(
-                cr * 255, cg * 255, cb * 255, last.name, last.c)
+            -- (their name and colour as in the rows: the RP ones when on, else class)
+            local cr, cg, cb = ns.RP.Color(last.key)
+            if not cr then cr, cg, cb = ns.classColor(last.cls) end
+            foot = foot .. ("\nLast week's winner: |cff%02x%02x%02x%s|r (%d)"):format(
+                cr * 255, cg * 255, cb * 255, ns.RP.Name(last.key) or last.name, last.c)
         end
     end
-    if #rows > ROWS then foot = foot .. " Scroll for more." end
     f.foot:SetText(foot)
 end
 
-ns.UI.AddPage(5, "Leaderboard", build, refresh)
+ns.UI.AddPage(5, "Leaderboard", build, refresh,
+    { order = 1, icon = { "Spell_Nature_MoonGlow", "Spell_Nature_StarFall" }, tooltip = "Leaderboard", title = "Ashenvale Leaderboard",
+      bgAtlas = "Legacy-Rewards-Tracker-background",   -- (the minimap button's)
+      button = "invite" })                              -- (the game's Invite Member, bottom right)
 
 ---------------------------------------------------------------------------
 -- Startup
@@ -489,7 +577,7 @@ ns.onLogin(function()
     end, "hk login")
 end, "leaderboard")
 
-ns.slash.hk = { help = "my Horde kills this week (Ashenvale and Stonetalon Peak)", fn = function()
+ns.slash.hk = { help = "my Horde kills this week (Ashenvale, Mount Hyjal and Stonetalon Peak)", fn = function()
     ns.print(("%d Horde kills this week (%d last week)."):format(LB.Mine(), LB.Mine(LB.Week() - 1)))
 end }
 

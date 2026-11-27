@@ -23,10 +23,10 @@ local RING = "Interface\\AddOns\\Moonwardens\\media\\ring"
 -- party/raid dots. (0.5.3 also ringed group members' dots; the rings lagged
 -- the game's dots and looked clunky, so 0.5.4 turned them off. NewHalo and
 -- GroupPositions stay for now, unused.)
-ns.DOT_DIAMOND = 11
+ns.DOT_DIAMOND = 12
 local DOT_SIZE = ns.DOT_DIAMOND
 local HALO_SIZE = 20
-local HOVER_RADIUS = 7
+local HOVER_RADIUS = 6       -- a 12 px hit, as OpenMap's player dots
 local PANEL_WIDTH = 196
 
 ---------------------------------------------------------------------------
@@ -59,7 +59,8 @@ function ns.NewDot(parent, size, shape)
     end
     d.outline = disc("ARTWORK", 1, 0); d.outline:SetVertexColor(0, 0, 0, 0.9)
     d.fill = disc("ARTWORK", 2, shape == "diamond" and 2 or 1.5)   -- (a diamond's edge is thinner at the same inset)
-    d.hole = disc("ARTWORK", 3, math.floor(size * 0.32)); d.hole:SetVertexColor(0.05, 0.05, 0.05, 0.9)
+    -- (the mark of an unknown layer: a small, light centre, so the dot keeps its colour)
+    d.hole = disc("ARTWORK", 3, math.floor(size * 0.38)); d.hole:SetVertexColor(0.05, 0.05, 0.05, 0.45)
     return d
 end
 
@@ -220,6 +221,54 @@ function ns.AddGuildieLines(tt, hits)
     if #hits > MAX_LINES then tt:AddLine(("and %d more"):format(#hits - MAX_LINES), 0.62, 0.62, 0.62) end
 end
 
+-- A group member (a unit token) who is a guildie with the addon: their
+-- position entry, as our dots carry; else nil. (The game draws group members
+-- itself; on both maps their tooltip becomes ours - see GroupTooltip.)
+function ns.GroupGuildie(unit)
+    if type(unit) ~= "string" then return nil end
+    local first, last = ns.try(UnitName, unit)
+    if type(first) ~= "string" then return nil end
+    local key = ns.key((type(last) == "string" and last ~= "") and (first .. " " .. last) or first)
+    if not (key and ns.Roster.Get(key)) then return nil end
+    return ns.Position.All()[key]
+end
+
+-- The game's tooltip for group members (world map pin, minimap) lists
+-- names, one a line. If every name in `tt` is one of `ghits` (guildies with
+-- the addon), its lines are replaced with ours: true. Else nothing is
+-- touched (ours are added after the game's by the caller): false.
+-- Only the tooltip's text is changed, never the game's pin or its data.
+function ns.GroupTooltip(tt, ghits, extra)
+    if #ghits == 0 then return false end
+    local keys = {}
+    for _, h in ipairs(ghits) do keys[h.d.g.key] = true end
+    local any = false
+    for i = 1, tt:NumLines() do
+        local fs = _G[tt:GetName() .. "TextLeft" .. i]
+        local t = fs and fs:GetText()
+        if type(t) == "string" and ns.readable(t) then
+            t = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+            for line in t:gmatch("[^\n]+") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then
+                    local name = line:gsub("%s*%(.-%)$", "")      -- (a note after the name, AFK and the like)
+                    local key = ns.key(name)
+                    if not (key and keys[key]) then return false end
+                    any = true
+                end
+            end
+        end
+    end
+    if not any then return false end
+    local all = {}
+    for _, h in ipairs(ghits) do all[#all + 1] = h end
+    for _, h in ipairs(extra or {}) do all[#all + 1] = h end
+    tt:ClearLines()
+    ns.AddGuildieLines(tt, ns.SortHits(all))
+    tt:Show()
+    return true
+end
+
 -- "key,key": who is in a set of hits (first MAX_LINES).
 function ns.HitsKey(hits)
     local keys = {}
@@ -227,8 +276,9 @@ function ns.HitsKey(hits)
     return table.concat(keys, ",")
 end
 
-local STICKY = 1.6   -- a dot already in the tooltip stays "hovered" out to this times the radius
-local GRACE = 0.25   -- seconds with nothing under the cursor before the tooltip goes
+local STICKY = 1     -- a dot already in the tooltip stays "hovered" out to this times the radius (1: no wider;
+                     -- OpenMap's dots hide on leaving, and so do ours now)
+local GRACE = 0      -- seconds with nothing under the cursor before the tooltip goes (0: at once, as OpenMap)
 
 -- Dots under the cursor. `st` (a caller's tooltip state) widens the radius
 -- for dots already shown, so a dot moving under a still cursor doesn't flicker.
@@ -255,7 +305,8 @@ end
 -- someone else's tooltip that took it over in the meantime.
 function ns.HideDotTooltip(st)
     if st.key and st.owner and GameTooltip:GetOwner() == st.owner then GameTooltip:Hide() end
-    st.key, st.keys, st.missAt, st.owner = nil, {}, nil, nil
+    if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(st.owner) end
+    st.key, st.keys, st.missAt, st.owner, st.trp = nil, {}, nil, nil, nil
 end
 
 -- Show the hit dots in GameTooltip on `owner` (as in 0.5.1, for the most
@@ -267,7 +318,8 @@ function ns.ShowDotTooltip(owner, hits, st)
     st.keys = st.keys or {}
     local tt = GameTooltip
     if tt:IsShown() and tt:GetOwner() ~= owner then
-        st.key, st.keys, st.missAt, st.owner = nil, {}, nil, nil
+        if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(owner) end
+        st.key, st.keys, st.missAt, st.owner, st.trp = nil, {}, nil, nil, nil
         return
     end
     if #hits == 0 then
@@ -279,7 +331,22 @@ function ns.ShowDotTooltip(owner, hits, st)
     st.missAt = nil
     ns.SortHits(hits)
     local setKey = ns.HitsKey(hits)
-    if setKey == st.key and tt:IsShown() and tt:GetOwner() == owner then return end
+    if setKey == st.key then
+        if st.trp and ns.RosterTRP and ns.RosterTRP.IsShown(owner) then return end
+        if not st.trp and tt:IsShown() and tt:GetOwner() == owner
+            and not (ns.RosterTRP and ns.RosterTRP.Ready(owner)) then return end
+    end
+    -- One guildie alone with a totalRP3 profile: totalRP3's own tooltip
+    -- (RosterTRP.lua). Stacked with others: the shared one below. (A map
+    -- pin's tooltip, a flight master's, never gets here: see the callers.)
+    if #hits == 1 and ns.RosterTRP and ns.RosterTRP.ShowDot(owner, hits[1].d.g) then
+        if tt:GetOwner() == owner then tt:Hide() end
+        st.key, st.owner, st.trp = setKey, owner, true
+        st.keys = { [hits[1].d.g.key] = true }
+        return
+    end
+    if st.trp and ns.RosterTRP then ns.RosterTRP.Hide(owner) end
+    st.trp = nil
     tt:SetOwner(owner, "ANCHOR_CURSOR")
     ns.AddGuildieLines(tt, hits)
     tt:Show()
@@ -549,16 +616,16 @@ local function updatePanel(map, onMap)
             c:ClearAllPoints()
             c:SetPoint("TOPLEFT", 12, y)
             c.keys = e.keys
-            c.title = e.unknownRow and "Layer not known" or (e.label .. (e.mine and " (yours)" or ""))
+            c.title = e.unknownRow and "Layer not known" or e.label
             if e.unknownRow then
                 c.name:SetText("Layer not known")
                 c.name:SetTextColor(0.75, 0.75, 0.75)
                 c.server:SetText("")
                 if c.SetBackdropBorderColor then c:SetBackdropBorderColor(0.3, 0.3, 0.3, 1) end
             else
-                c.name:SetText(e.label .. (e.mine and " |cff1eff00- you|r" or ""))
+                c.name:SetText(e.label)
                 c.name:SetTextColor(1, 0.82, 0)
-                c.server:SetText(e.layer)
+                c.server:SetText(e.sub or "")
                 if c.SetBackdropBorderColor then
                     if e.mine then c:SetBackdropBorderColor(0.85, 0.68, 0.1, 1) else c:SetBackdropBorderColor(0.3, 0.3, 0.3, 1) end
                 end
@@ -730,11 +797,10 @@ local function onUpdate(_, elapsed)
         acc = 0
         MapWorld.Refresh()
     end
-    hoverAcc = hoverAcc + elapsed
-    if hoverAcc >= 0.05 then
-        hoverAcc = 0
-        MapWorld.Hover()
-    end
+    -- Hover every frame, so the tooltip comes and goes as the cursor does
+    -- (OpenMap's dots are buttons: OnEnter / OnLeave). Ours take no mouse,
+    -- so clicks and drags go to the map; this hit test stands in for that.
+    MapWorld.Hover()
 end
 
 ---------------------------------------------------------------------------
@@ -757,6 +823,8 @@ local function onWorldMap(f)
     return false
 end
 
+local replaced              -- { owner, key }: the game's group tooltip we replaced (until it rebuilds)
+
 local function pinTooltipUp()
     if not GameTooltip:IsShown() then return nil end
     local owner = GameTooltip:GetOwner()
@@ -770,6 +838,32 @@ end
 function MapWorld.Hover()
     local hits = viewport:IsMouseOver() and ns.DotsUnderCursor(dots, used, HOVER_RADIUS, tip) or {}
     local owner = pinTooltipUp()
+    -- The game's group member pin: the guildies under the cursor are the
+    -- ones it says are (its own hover). All of them ours: its tooltip is
+    -- replaced by ours, once per change of who (it rebuilds only then).
+    if owner and type(owner.GetCurrentMouseOverUnits) == "function" then
+        local ok, units = pcall(owner.GetCurrentMouseOverUnits, owner)
+        local ghits = {}
+        if ok and type(units) == "table" then
+            for unit in pairs(units) do
+                local g = ns.GroupGuildie(unit)
+                if g then ghits[#ghits + 1] = { d = { g = g } } end
+            end
+        end
+        if #ghits > 0 then
+            local all = {}
+            for _, h in ipairs(ghits) do all[#all + 1] = h end
+            for _, h in ipairs(hits) do all[#all + 1] = h end
+            local key = ns.HitsKey(ns.SortHits(all))
+            if replaced and replaced.owner == owner and replaced.key == key then return end
+            ns.HideDotTooltip(tip)
+            if ns.GroupTooltip(GameTooltip, ghits, hits) then
+                replaced = { owner = owner, key = key }
+                return
+            end
+            hits = all                    -- (others there too: ours join the game's)
+        end
+    end
     if owner then
         ns.HideDotTooltip(tip)            -- (never two boxes)
         if #hits == 0 then return end
@@ -788,16 +882,19 @@ end
 
 ns.onLogin(function()
     -- (whether or not the map drawing is on: harmless, and /mw map on needs no reload)
-    ns.WatchTooltip(GameTooltip, function() joined = nil end)
+    ns.WatchTooltip(GameTooltip, function() joined = nil; replaced = nil end)
 end, "world map tooltip")
 
 local function onShow()
     if off() or inInstance() then hideAll(); return end
     if not cacheCanvas() then return end
-    if not panel then buildPanel() end
     viewport:Show()
-    panel:Show()
-    placePanel()
+    -- (the side panel, all about layers: off with them, ns.LAYERS)
+    if ns.LAYERS then
+        if not panel then buildPanel() end
+        panel:Show()
+        placePanel()
+    end
     shownMap = readShownMap()
     acc = 1   -- draw on the first frame
     driver:Show()

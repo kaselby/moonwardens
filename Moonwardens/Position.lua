@@ -1,5 +1,6 @@
 -- Position: where I am (sent as P), where guildies are (received P / Q).
 -- P|1|map|x|y|layer|flags|level   Q|1
+-- PQ|1: "where is everyone?" (sent after a login or /reload), answered with a P.
 -- flags: 1 = in combat, 2 = dead or ghost, 4 = data collection on.
 local _, ns = ...
 local Position = {}
@@ -16,6 +17,8 @@ local guildies = {}       -- key -> { key, map, x, y, layer, flags, level, at }
 local me = {}             -- { map, x, y, flags, layer }
 local lastSent = { at = -100 }
 local quiet = false       -- true after we sent Q (instance); next P ends it
+local replyPending = false -- a PQ answer is on its way
+local lastHeardAt = -100   -- when the last P arrived
 
 ---------------------------------------------------------------------------
 -- Reading my own position
@@ -101,6 +104,7 @@ local function onP(f, sender, key)
     g.flags = tonumber(f[7]) or 0
     g.level = tonumber(f[8])
     g.at = ns.now()
+    lastHeardAt = g.at
     g.cache = nil              -- converted positions (MapWorld) are now old
     guildies[key] = g
     ns.fire("POSITION", key, g)
@@ -177,13 +181,6 @@ local function noteSeen(unit)
     local key = unitKey(unit)
     if not (key and ns.Roster.Get(key)) then return end
     seenAt[key] = ns.now()
-    -- If they know their layer here and I don't, it's mine too: take it, so
-    -- my own reports carry it (the next NPC I see confirms or replaces it).
-    local g = guildies[key]
-    if g and me.map and g.map == me.map and g.layer and g.layer > 0
-        and ns.Layer and ns.Layer.Adopt then
-        ns.Layer.Adopt(me.map, g.layer, key)
-    end
 end
 
 local function scanPlayerPlates()
@@ -203,14 +200,6 @@ function Position.SeenRecently(key)
     return at ~= nil and ns.now() - at <= SEEN_FOR
 end
 
--- A guildie's layer as far as I can tell: what they report, or mine when
--- they don't know theirs but I can see them (seeing them proves it). 0: unknown.
-function Position.LayerOf(g)
-    if g.layer and g.layer > 0 then return g.layer end
-    if g.map == me.map and Position.SeenRecently(g.key) then return myLayer(me.map) end
-    return 0
-end
-
 function Position.CountInMyZone()
     if not me.map then return nil end
     local n = 0
@@ -226,48 +215,96 @@ end
 -- with the same data sees the same "Layer 2".
 ---------------------------------------------------------------------------
 
--- Sorted list of { layer, n, mine, keys } for a map, plus the unknown count
--- and the keys of those whose layer is unknown. `keys`: who is on it (me too).
+-- Guildies in a zone by how their layer relates to mine: { label, n, mine,
+-- keys, sub } for "Your layer" (me too) and "Another layer", plus the
+-- unknown count and keys. There are no layer numbers to tell layers apart any
+-- more (build 71037), so other layers aren't split: "Another layer" may be
+-- several. `sub`: how many of them are only leads ("2 probable").
+-- Another zone than mine: everyone there is unknown to me.
 function Position.LayersIn(map)
-    local by, unknown, unknownKeys = {}, 0, {}
-    local function add(layer, key, isMe)
-        if not layer or layer == 0 then
-            unknown = unknown + 1
-            unknownKeys[#unknownKeys + 1] = key
-            return
+    -- Agreed numbers (LayerLink.lua): "Layer 1", "Layer 2"..., mine marked.
+    if ns.LayerLink and ns.LayerLink.LayersOf then
+        local layers, loose = ns.LayerLink.LayersOf(map)
+        local myN = (me.map == map) and ns.LayerLink.MyLabel() or nil
+        local list = {}
+        for _, e in ipairs(layers) do
+            list[#list + 1] = { label = ("Layer %d%s"):format(e.n, e.n == myN and " - yours" or ""), n = #e.keys,
+                keys = e.keys, mine = e.n == myN, sub = e.leads > 0 and (e.leads .. " probable") or "" }
         end
-        local e = by[layer] or { layer = layer, n = 0, keys = {} }
-        e.n = e.n + 1
-        e.keys[#e.keys + 1] = key
-        if isMe then e.mine = true end
-        by[layer] = e
+        -- (only once some are agreed: before that, "Your layer" / "Another
+        -- layer" below, from what's known of each guildie)
+        if #list > 0 then return list, #loose, loose end
     end
+    local yours = { label = "Your layer", n = 0, keys = {}, mine = true, leads = 0 }
+    local other = { label = "Another layer", n = 0, keys = {}, leads = 0 }
+    local unknown, unknownKeys = 0, {}
     for key, g in pairs(Position.All()) do
-        if g.map == map then add(Position.LayerOf(g), key) end
+        if g.map == map then
+            local rel, sure = Position.Relation(g)
+            local e = rel == "same" and yours or rel == "other" and other or nil
+            if e then
+                e.n = e.n + 1
+                e.keys[#e.keys + 1] = key
+                if not sure then e.leads = e.leads + 1 end
+            else
+                unknown = unknown + 1
+                unknownKeys[#unknownKeys + 1] = key
+            end
+        end
     end
-    if me.map == map and ns.meKey then add(myLayer(map), ns.meKey, true) end
     local list = {}
-    for _, e in pairs(by) do list[#list + 1] = e end
-    table.sort(list, function(a, b) return a.layer < b.layer end)
-    for i, e in ipairs(list) do e.label = "Layer " .. i end
+    if me.map == map and ns.meKey then
+        yours.n = yours.n + 1
+        yours.keys[#yours.keys + 1] = ns.meKey
+        list[#list + 1] = yours
+    elseif yours.n > 0 then
+        list[#list + 1] = yours
+    end
+    if other.n > 0 then list[#list + 1] = other end
+    for _, e in ipairs(list) do e.sub = e.leads > 0 and (e.leads .. " probable") or "" end
     return list, unknown, unknownKeys
 end
 
-function Position.LayerLabel(map, layer)
-    if not layer or layer == 0 then return nil end
-    for _, e in ipairs(Position.LayersIn(map)) do
-        if e.layer == layer then return e.label end
-    end
-end
+-- (Layer numbers have no labels any more: kept for older callers.)
+function Position.LayerLabel() return nil end
 
 -- How a guildie's layer relates to mine: "same", "other", "unknown", or
 -- "na" (other zone, or no layer detector yet: drawn solid).
+-- A second result says whether it's proven (true) or only a lead (false).
+-- Layer numbers decide where the game still gives a shared one (before build
+-- 71037); evidence between players (LayerLink.lua) everywhere else.
 function Position.Relation(g)
     if not ns.Layer or g.map ~= me.map then return "na" end
-    if Position.SeenRecently(g.key) then return "same" end -- seeing them proves it
-    local mine = myLayer(me.map)
-    if not g.layer or g.layer == 0 or mine == 0 then return "unknown" end
-    return g.layer == mine and "same" or "other"
+    if Position.SeenRecently(g.key) then return "same", true end -- seeing them proves it
+    if not (ns.Layer.Private and ns.Layer.Private()) then
+        local mine = myLayer(me.map)
+        if g.layer and g.layer ~= 0 and mine ~= 0 then return g.layer == mine and "same" or "other", true end
+    end
+    if ns.LayerLink then
+        local rel, sure = ns.LayerLink.Relation(g)
+        if rel then return rel, sure end
+    end
+    return "unknown"
+end
+
+-- A guildie's layer as a line of text: the agreed number (LayerLink.lua)
+-- when there is one, "your layer" when it's mine; else the relation.
+function Position.LayerText(g)
+    local LL = ns.LayerLink
+    local n, lead, map
+    if LL then n, lead, map = LL.Label(g.key) end
+    if n then
+        local mine = map == me.map and LL.MyLabel() == n
+        return ("Layer %d%s%s"):format(n, lead and "?" or "", mine and " - your layer" or ""), mine
+    end
+    return Position.RelationText(Position.Relation(g))
+end
+
+-- How a relation reads in tooltips and lists.
+function Position.RelationText(rel, sure)
+    if rel == "same" then return sure and "Your layer" or "Probably your layer" end
+    if rel == "other" then return sure and "Another layer" or "Probably another layer" end
+    if rel == "unknown" then return "Layer not known yet" end
 end
 
 -- Is a profile's class just the game's class? totalRP3 fills a new profile's
@@ -324,11 +361,8 @@ function Position.AddTooltip(tt, g)
     end
     if Position.HasFlag(g, Position.FLAG_DEAD) then tt:AddLine("Dead", 0.62, 0.62, 0.62)
     elseif Position.HasFlag(g, Position.FLAG_COMBAT) then tt:AddLine("In combat", 1, 0.25, 0.25) end
-    local rel = Position.Relation(g)
-    local label = Position.LayerLabel(g.map, Position.LayerOf(g))
-    if rel == "same" then tt:AddLine((label or "Layer") .. " (same as you)", 0.75, 0.75, 0.75)
-    elseif rel == "other" then tt:AddLine((label or "Layer") .. " (not yours)", 0.75, 0.75, 0.75)
-    elseif rel == "unknown" then tt:AddLine("Layer not known yet", 0.62, 0.62, 0.62) end
+    local text = Position.LayerText(g)
+    if text then tt:AddLine(text, 0.75, 0.75, 0.75) end
     local age = ns.now() - g.at
     if age > 20 then tt:AddLine(("last seen %d s ago"):format(age), 0.62, 0.62, 0.62) end
 end
@@ -340,15 +374,68 @@ ns.onLogin(function()
     ns:On("GROUP_ROSTER_UPDATE", rebuildGroup)
     -- Names can read as unknown for a moment after someone joins; recheck.
     ns.every(2, rebuildGroup, "group members")
-    ns:On("NAME_PLATE_UNIT_ADDED", function(unit) noteSeen(unit) end)
-    ns:On("UPDATE_MOUSEOVER_UNIT", function() noteSeen("mouseover") end)
-    ns:On("PLAYER_TARGET_CHANGED", function() noteSeen("target") end)
-    ns.every(5, scanPlayerPlates, "player plates")
+    -- (seen in the world: only for layers - off, ns.LAYERS, not looked for)
+    if ns.LAYERS then
+        ns:On("NAME_PLATE_UNIT_ADDED", function(unit) noteSeen(unit) end)
+        ns:On("UPDATE_MOUSEOVER_UNIT", function() noteSeen("mouseover") end)
+        ns:On("PLAYER_TARGET_CHANGED", function() noteSeen("target") end)
+        ns.every(5, scanPlayerPlates, "player plates")
+    end
     ns.every(1, function() Position.Tick() end, "position")
     ns:On("ZONE_CHANGED_NEW_AREA", function() ns.after(1, function() Position.Tick(true) end, "position zone") end)
     -- Loading screen or logout: drop my dot now; PLAYER_ENTERING_WORLD brings it back.
     ns:On("PLAYER_LEAVING_WORLD", function() sendQuiet(true) end)
-    ns:On("PLAYER_ENTERING_WORLD", function() ns.after(3, function() Position.Tick(true) end, "position enter") end)
+    ns:On("PLAYER_ENTERING_WORLD", function(isLogin, isReload)
+        -- After a login or /reload: ask everyone where they are at once,
+        -- instead of waiting up to STILL_EVERY s for each one's next P (OpenMap
+        -- does the same with its hello, answered with a place). Our own place
+        -- goes out now too; the usual 3 s / 15 s sends carry on from there.
+        -- (The queue holds both while the game won't let addons send yet.)
+        if isLogin or isReload then
+            local askedAt = ns.now()
+            ns.Comm.Send({ "PQ", ns.Comm.PROTO }, "GUILD")
+            -- Once more if nobody answered: just after a fresh login the game can
+            -- say we're in no guild yet, and the queue drops guild messages then.
+            ns.after(4, function()
+                if lastHeardAt < askedAt then ns.Comm.Send({ "PQ", ns.Comm.PROTO }, "GUILD") end
+            end, "position ask again")
+        end
+        Position.Tick(true)
+        ns.after(1, function() Position.Tick(true) end, "position enter")   -- (if the map wasn't readable yet)
+    end)
+    ns.Comm.handlers.PQ = function()
+        -- Answer once: a burst of asks (several logins) is one reply. A short
+        -- jitter keeps the guild's replies from landing in the same instant.
+        if replyPending then return end
+        replyPending = true
+        ns.after(math.random() * 0.3, function()
+            replyPending = false
+            Position.Tick(true)
+        end, "position reply")
+    end
+    -- Across a /reload: the dots we had come back at once (the game keeps
+    -- nothing of ours through one). Only fresh ones, ageing on from where they were.
+    local c = ns.db and ns.db.posCache
+    ns.db.posCache = nil
+    if type(c) == "table" and type(c.at) == "number" and type(c.list) == "table" then
+        local gap = time() - c.at
+        if gap >= 0 and gap < STALE then
+            for key, e in pairs(c.list) do
+                local age = gap + (tonumber(e.age) or STALE)
+                if type(e) == "table" and age < STALE and e.map and e.x and e.y and not guildies[key] then
+                    guildies[key] = { key = key, map = e.map, x = e.x, y = e.y, layer = e.layer or 0,
+                        flags = e.flags or 0, level = e.level, at = ns.now() - age }
+                end
+            end
+        end
+    end
+    ns:On("PLAYER_LOGOUT", function()
+        local list, now = {}, ns.now()
+        for key, g in pairs(guildies) do
+            list[key] = { map = g.map, x = g.x, y = g.y, layer = g.layer, flags = g.flags, level = g.level, age = now - g.at }
+        end
+        ns.db.posCache = { at = time(), list = list }
+    end)
 end, "position")
 
 ns.slash.where = { help = "where guildies with the addon are", fn = function()
@@ -363,9 +450,29 @@ ns.slash.where = { help = "where guildies with the addon are", fn = function()
     for z, c in pairs(zones) do ns.print(("  %s: %d"):format(z, c)) end
 end }
 
--- /mw test: three online guildies placed around me for 50 s (until they go
--- stale), so the dots, tooltip and panel can be checked alone.
-ns.slash.test = { help = "show three test dots near you for 50 s", fn = function()
+-- /mw test mapdots on: three online guildies placed around me (one in
+-- combat on my layer, one on another, one unknown), so the dots, tooltip and
+-- panel can be checked alone; kept there until /mw test mapdots off (or
+-- until they send a position of their own).
+local testDots, testTicker
+local function clearTestDots()
+    if testTicker then testTicker:Cancel(); testTicker = nil end
+    for key in pairs(testDots or {}) do guildies[key] = nil end
+    testDots = nil
+end
+ns.tests.mapdots = { dev = true, usage = "on | off", help = "three test guildie dots around you on the maps", fn = function(arg)
+    arg = (arg or ""):lower()
+    if arg == "off" then
+        local had = testDots ~= nil
+        clearTestDots()
+        ns.print(had and "test dots off." or "no test dots to take away.")
+        return
+    end
+    if arg ~= "on" then
+        ns.print(("test dots are %s. /mw test mapdots on | off"):format(testDots and "on" or "off"))
+        return
+    end
+    clearTestDots()
     local map, x, y = Position.ReadMine()
     if not (map and x) then ns.print("can't read your position here.") return end
     local picks = {}
@@ -376,9 +483,17 @@ ns.slash.test = { help = "show three test dots near you for 50 s", fn = function
     local spots = { { 0.01, 0 }, { -0.008, 0.008 }, { 0, -0.012 } }
     local myL = me.layer and me.layer > 0 and me.layer or 1
     local layers = { myL, myL + 1, 0 }
+    testDots = {}
     for i, key in ipairs(picks) do
         guildies[key] = { key = key, map = map, x = x + spots[i][1], y = y + spots[i][2],
             layer = layers[i], flags = i == 1 and Position.FLAG_COMBAT or 0, at = ns.now() }
+        testDots[key] = guildies[key]
     end
-    ns.print(("test dots: %d guildies placed around you on the world map and minimap for 50 s."):format(#picks))
+    -- (kept fresh until turned off; one that sends a real position is theirs again)
+    testTicker = C_Timer.NewTicker(10, function()
+        for key, g in pairs(testDots or {}) do
+            if guildies[key] == g then g.at = ns.now() else testDots[key] = nil end
+        end
+    end)
+    ns.print(("test dots: %d guildies placed around you on the world map and minimap, until /mw test mapdots off."):format(#picks))
 end }

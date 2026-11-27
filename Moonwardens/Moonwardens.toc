@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Moonwardens
-## Notes: Guild map, layers, alerts, stats and leaderboard for the Moonwardens. Type /mw.
+## Notes: Guild map, alerts, stats and leaderboard for the Moonwardens. Type /mw.
 ## Author: Krylea
-## Version: 0.6.0
+## Version: 0.7.0
 ## IconTexture: Interface\Icons\Spell_Nature_MoonGlow
 ## X-License: All Rights Reserved
 ## SavedVariables: MoonwardensDB
@@ -14,9 +14,23 @@ Roster.lua
 RP.lua
 Position.lua
 Layer.lua
+LayerLink.lua
 MapWorld.lua
 MapMini.lua
 Compat_OpenMap.lua
 Alert.lua
 UI.lua
+Dialog.lua
 Leaderboard.lua
+Badges.lua
+Ledger.lua
+Hunt.lua
+Captures.lua
+BadgesUI.lua
+BadgeChest.lua
+OfficerUI.lua
+GuildTabs.lua
+RosterLayer.lua
+RosterTRP.lua
+GuildInfoStats.lua
+Menu.lua

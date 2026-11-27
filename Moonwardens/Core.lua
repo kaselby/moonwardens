@@ -1,6 +1,6 @@
 -- Core: namespace, saved settings, events, timers, safe reads, slash command.
 local ADDON, ns = ...
-ns.VERSION = "0.6.0"
+ns.VERSION = "0.7.0"
 _G.Moonwardens = ns -- for /dump and other addons; nothing reads it back
 
 ---------------------------------------------------------------------------
@@ -32,6 +32,15 @@ function ns.try(f, ...)
 end
 
 function ns.now() return GetTime() end
+
+-- Layers: off for the stable release (the detection is too unsure to show).
+-- Off, nothing reads or works out a layer: no creature or nameplate reading
+-- (Layer.lua), no sightings or layer numbers between guildies (LayerLink.lua),
+-- no layer panel on the world map, no Layer column on the roster, and the two
+-- layer settings hidden. Positions and alerts still carry their layer field,
+-- always 0 ("not known"), so older versions read them as before. Every
+-- guildie's dot is drawn plain. true brings it all back; nothing was removed.
+ns.LAYERS = false
 
 ---------------------------------------------------------------------------
 -- Names. On Forever a character is "First Surname"; addon senders arrive as
@@ -69,6 +78,7 @@ ns.DEFAULTS = {
     alertButton = true, alertButtonLocked = false, alertButtonPos = nil,
     autoInvite = true, autoRaid = true, autoAccept = false, sound = true,
     worldDots = true, otherLayers = true, minimapDots = true,
+    layerPlates = true,  -- show nameplates for a moment to read the layer (Layer.lua)
     rpColors = false, rpNames = false, -- totalRP3 profiles on the dots (RP.lua)
     dataCollection = true, minimapAngle = 200, mapKill = false,
 }
@@ -169,7 +179,25 @@ end)
 
 ---------------------------------------------------------------------------
 -- Slash command: modules add verbs with ns.slash[verb] = { fn, help }.
+-- `dev = true`: a tool for testing the addon, for its makers only (ns.DEVS);
+-- `allowed()`: only for those it says (officers...). Anyone else never sees
+-- it in the lists, and typing it just lists the commands.
 ---------------------------------------------------------------------------
+ns.DEVS = { ["shandor moonfang"] = true, ["kaelith nightbough"] = true }   -- (Shandor; Krylea)
+function ns.IsDev(key)
+    key = key or ns.meKey
+    return key ~= nil and ns.DEVS[key] == true
+end
+local function usable(c)
+    if c.dev and not ns.IsDev() then return false end
+    if c.allowed then
+        local ok, yes = pcall(c.allowed)
+        if not (ok and yes) then return false end
+    end
+    return true
+end
+ns.SlashUsable = usable
+
 ns.slash = {}
 SLASH_MOONWARDENS1 = "/mw"
 SLASH_MOONWARDENS2 = "/moonwardens"
@@ -177,11 +205,32 @@ SlashCmdList.MOONWARDENS = function(msg)
     local verb, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     verb = verb:lower()
     local c = ns.slash[verb]
-    if c then return c.fn(rest) end
+    if c and usable(c) then return c.fn(rest) end
     if verb == "" and ns.ToggleWindow then return ns.ToggleWindow() end
     ns.print("v" .. ns.VERSION .. " commands:")
     local verbs = {}
-    for v in pairs(ns.slash) do verbs[#verbs + 1] = v end
+    for v, cc in pairs(ns.slash) do if usable(cc) then verbs[#verbs + 1] = v end end
     table.sort(verbs)
     for _, v in ipairs(verbs) do ns.print("  /mw " .. v .. " - " .. ns.slash[v].help) end
 end
+
+---------------------------------------------------------------------------
+-- /mw test: things to try out in game, each its own word ("/mw test
+-- badges on"). Modules add them with ns.tests[name] = { usage, help, fn },
+-- `dev` and `allowed` as for commands; "/mw test" alone lists the ones
+-- I may use.
+---------------------------------------------------------------------------
+ns.tests = {}
+ns.slash.test = { help = "things to try out in game (/mw test for the list)", fn = function(rest)
+    local name, arg = (rest or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    local t = ns.tests[name:lower()]
+    if t and usable(t) then return t.fn(arg) end
+    ns.print("things to test in game:")
+    local names = {}
+    for n, tt in pairs(ns.tests) do if usable(tt) then names[#names + 1] = n end end
+    table.sort(names)
+    for _, n in ipairs(names) do
+        local u = ns.tests[n].usage
+        ns.print(("  /mw test %s%s - %s"):format(n, (u and u ~= "") and (" " .. u) or "", ns.tests[n].help))
+    end
+end }
