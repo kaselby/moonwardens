@@ -37,7 +37,7 @@ local saved
 -- Also new: a badge not earned and never hovered - every one there is, the
 -- first time, and each one added to the addon after (a new release, a new
 -- month's hunt targets) - the same dot, gone on the first hover, as an
--- earned one's. Dotted only while "View Only Acquired Badges" is off, as
+-- earned one's. Dotted only while "View Only Collected Badges" is off, as
 -- that's when the Overview shows them. (MoonwardensDB.badgeListed: every
 -- badge id seen in the list; badgeUnseen { id = true }.)
 ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ function New.Dot(parent, size, point, x, y, strong)
     return holder
 end
 
--- Is the Overview showing badges not earned yet ("View Only Acquired
+-- Is the Overview showing badges not earned yet ("View Only Collected
 -- Badges" off)?
 local function showingAll()
     local ui = ns.db and ns.db.badgeUI
@@ -311,7 +311,7 @@ local function loadSaved()
         for _, c in ipairs(Badges.CATEGORIES) do if c.children then collapsed[c.id] = true end end
     end
     saved = { cat = sv.cat or "overview", collapsed = collapsed, scroll = sv.scroll or {}, open = sv.open or {}, shut = sv.shut or {},
-        onlyAcquired = sv.onlyAcquired == true }      -- (the Overview's "View Only Acquired Badges": off at first)
+        onlyAcquired = sv.onlyAcquired == true }      -- (the Overview's "View Only Collected Badges": off at first)
     ns.db.badgeUI = saved
     state.cat = saved.cat
     state.collapsed = saved.collapsed
@@ -553,6 +553,8 @@ local function badgeTooltip(owner, b, e)
         else
             lines[#lines + 1] = { when and ("Earned on " .. when) or "Earned", 0.12, 1, 0 }
         end
+    elseif b.kind ~= "parent" then
+        lines[#lines + 1] = { "Not Collected", 0.62, 0.62, 0.62, big = true }   -- (not earned yet: grey, as its icon; the Tiers heading's size)
     end
     if b.kind == "selflifetime" or b.kind == "manual" or b.kind == "lifetime" then
         lines[#lines + 1] = { ("Progress: %s / %s"):format(commas(e.value), commas(e.goal)), 1, 0.82, 0 }
@@ -568,7 +570,14 @@ local function badgeTooltip(owner, b, e)
     if needs then lines[#lines + 1] = { needs, 1, 0.82, 0 } end
     if #lines > 0 then
         GameTooltip:AddLine(" ")
-        for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], true) end
+        for _, l in ipairs(lines) do
+            GameTooltip:AddLine(l[1], l[2], l[3], l[4], true)
+            -- (`big`: as large as the Tiers heading, 2 px over the tooltip's text)
+            if l.big and ns.UI and ns.UI.TooltipLineSize and GameTooltipText then
+                local _, size = GameTooltipText:GetFont()
+                ns.UI.TooltipLineSize(GameTooltip:NumLines(), math.floor((size or 12) + 0.5) + 2)
+            end
+        end
     end
     tipFinish(b, h)
 end
@@ -1337,7 +1346,7 @@ end
 -- Overview (mine) and in the Badge Chest (anyone's: BadgeChest.lua).
 -- The Showcase is never sorted: the Chest's sort (and anything else) only
 -- orders the Collection under it; the Showcase stays as placed.
--- With `all` (the Overview's "View Only Acquired Badges" off), the badges
+-- With `all` (the Overview's "View Only Collected Badges" off), the badges
 -- not yet earned follow the Collection, greyed, each filled bottom to top
 -- in the progress bar's colour as far as it's got - closest first. They
 -- can't be dragged.
@@ -1662,7 +1671,7 @@ local function newBoard(parent, opts)
             y = y - math.max(12, math.ceil(self.dragHint:GetStringHeight() or 12)) - 4
         end
         -- (no badges at all: the Collection's heading and its control stay -
-        -- the Overview's View Only Acquired Badges must be there to untick -
+        -- the Overview's View Only Collected Badges must be there to untick -
         -- and "no badges yet" goes where its icons would be)
         local any = filled + #rest + #locked > 0
         self.none:Hide()
@@ -1720,7 +1729,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Overview (right): your Badge Showcase, then your Badge Collection (the
--- badge board, above), with "View Only Acquired Badges" on its heading:
+-- badge board, above), with "View Only Collected Badges" on its heading:
 -- off (the first time, and until it's ticked; remembered), every badge
 -- there is follows your earned ones, greyed and filled as far as you've got.
 -- (Inspect Badges, for the Badge Inspector, is under the category list, on
@@ -1736,14 +1745,14 @@ local function buildOverview(f, parent, w)
     o.board:SetPoint("TOPLEFT")
     o.board:SetWidth(w)
 
-    -- View Only Acquired Badges: its label, then the box.
+    -- View Only Collected Badges: its label, then the box.
     local hold = CreateFrame("Frame", nil, o)
     hold:SetSize(10, 24)
     local cb = CreateFrame("CheckButton", nil, hold, "UICheckButtonTemplate")
     cb:SetSize(24, 24)
     cb:SetPoint("RIGHT")
     local label = text(hold, "GameFontNormal")
-    label:SetText("View Only Acquired Badges")
+    label:SetText("View Only Collected Badges")
     label:SetPoint("RIGHT", cb, "LEFT", -2, 1)
     hold:SetWidth(label:GetStringWidth() + 30)
     cb:SetScript("OnClick", function(self)

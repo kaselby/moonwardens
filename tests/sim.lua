@@ -1380,6 +1380,25 @@ do
     ns.db.objectiveCaptures = keepCaps
 end
 
+-- A badge not earned yet says so in its tooltip ("Not Collected"); an
+-- earned one doesn't. The Overview's checkbox: View Only Collected Badges.
+do
+    local K, B = ns.BadgesUI.Kit, ns.Badges
+    local owner = W.new("Frame", nil)
+    local function tipFor(id, times)
+        K.badgeTooltip(owner, B.Get(id), { times = times, value = 0, goal = B.Get(id).goal })
+        return table.concat(GameTooltip.lines, "\n")
+    end
+    check(tipFor("lt4", 0):find("Not Collected", 1, true), "a badge not earned: Not Collected in its tooltip")
+    check(not tipFor("lt1", 1):find("Not Collected", 1, true), "an earned one: no Not Collected")
+    GameTooltip:Hide()
+    local said = false
+    for _, f in pairs(W.frames or {}) do
+        if type(f) == "table" and f._text == "View Only Collected Badges" then said = true end
+    end
+    check(said, "the Overview's checkbox reads View Only Collected Badges")
+end
+
 -- An offline guildie's badges: no whisper (the game would say "No player
 -- named ..."); what an online one sends is kept for when they're offline
 do
