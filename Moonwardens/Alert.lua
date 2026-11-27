@@ -236,7 +236,10 @@ local function onPartyInvite(name)
     if ns.key(name) ~= acceptFrom then return end
     acceptFrom = nil
     pcall(AcceptGroup)
-    if StaticPopup_Hide then pcall(StaticPopup_Hide, "PARTY_INVITE") end
+    -- (The game's invite box is left for the game to close. Closing it
+    -- ourselves - StaticPopup_Hide - taints the game's popups for the rest
+    -- of the session: the next one, a guild note's, had its saving blocked
+    -- as "Moonwardens".)
 end
 
 ---------------------------------------------------------------------------

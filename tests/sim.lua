@@ -483,7 +483,7 @@ check(MoonwardensAlertBanner.respond:GetText() == "Responded", "button says Resp
 W.fire("PARTY_INVITE_REQUEST", "Caelith-Shade")
 check(W.accepted == 0, "no auto-accept from someone else")
 W.fire("PARTY_INVITE_REQUEST", "Thalanor-Oakheart")
-check(W.accepted == 1 and W.popupsHidden[1] == "PARTY_INVITE", "auto-accept from the sender")
+check(W.accepted == 1 and #W.popupsHidden == 0, "auto-accept from the sender (the game's invite box left to the game: closing it taints its popups)")
 ns.db.autoAccept = false
 -- Banner goes 3 s after answering; a ping again doesn't bring it back; E clears the pip
 check(MoonwardensAlertBanner:IsShown(), "banner still up just after answering")
