@@ -1,7 +1,8 @@
--- GuildTabs: the Leaderboard and Stats pages as side tabs on the
--- game's guild window (J: the Communities frame): Leaderboard on top,
--- above its own Chat tab, and the window opens on it; Stats under
--- its Roster, Info... tabs. Pages opt in with the `guild` argument of
+-- GuildTabs: the Leaderboard and Badges pages as side tabs on the
+-- game's guild window (J: the Communities frame), in one column with its
+-- own Chat, Roster, Info... tabs - Leaderboard on top and Badges under the
+-- game's, until dragged into another order (kept: layout, below). The
+-- window opens on the top tab. Pages opt in with the `guild` argument of
 -- ns.UI.AddPage; the Moonwardens window keeps the rest (Settings).
 --
 -- We never change the guild window's own mode (its SetDisplayMode): our page
@@ -22,7 +23,7 @@ local failed = false        -- the guild window isn't shaped as we expect
 local overlay
 local tabs = {}             -- our tab buttons, in page order
 local current               -- page index shown on the guild window, or nil
-local opened = false        -- the window has been open this session (login/reload: Leaderboard first)
+local opened = false        -- the window has been open this session (login/reload: the top tab first)
 local remembered            -- our page to come back to: the window reopened, or the guild picked again
 local pending               -- a page asked for while the window was closed (GT.Toggle): it opens on this
 local W, H = 1018, 533      -- the window with Moonwardens picked: a quarter bigger than the game's 814 x 426
@@ -230,13 +231,151 @@ local function hookGameTab(t)
     t:HookScript("OnClick", function() GT.Deselect() end)
 end
 
--- Our first tab (Leaderboard) takes the top spot, where the game's Chat tab
--- was, and Chat moves down under it (the game never re-anchors Chat). The
--- rest go under the lowest of the game's, 20 px apart as theirs are.
--- Preferred Play Settings goes last of all, under ours, and only the guild
--- master sees it (they're the guild's settings; only the GM can set them).
--- No tabs of the game's (minimized, guild finder): none of ours either.
-local function layout()
+---------------------------------------------------------------------------
+-- The side tabs' order: ours and the game's (Chat, Roster, Info...) in one
+-- column, 20 px apart as the game spaces them, from where its Chat tab
+-- sits. Any of them can be dragged up or down (a ghost of its icon follows
+-- the cursor, a gold line shows where it lands) and the order is kept
+-- (MoonwardensDB.guildTabOrder: "mw:<page>", "game:<its key>"). Not set:
+-- our first (Leaderboard) on top, then the game's in its own order, then
+-- the rest of ours. Preferred Play Settings goes last of all, not dragged,
+-- and only the guild master sees it (the guild's settings: only the GM can
+-- set them). No tabs of the game's (minimized, guild finder): none of ours.
+-- (Only anchored and hooked: the game's tabs keep their own clicks.)
+---------------------------------------------------------------------------
+local GAME_KEYS = { "ChatTab", "RosterTab", "GuildBenefitsTab", "GuildInfoTab" }
+local laid = {}              -- the tabs as laid out, top first
+local dragHooked = {}        -- tab -> true (kept here, not on the game's)
+local drag                   -- the tab being dragged
+
+local function idOf(t)
+    if t.mwTab then
+        local p = ns.UI.pages[t.index]
+        return "mw:" .. tostring(p and p.label or t.index)
+    end
+    local cf = CommunitiesFrame
+    for _, k in ipairs(GAME_KEYS) do if cf[k] == t then return "game:" .. k end end
+    local n = t.GetName and t:GetName()
+    return "game:" .. tostring(n or t)
+end
+
+-- `ids` in their default order, `saved` the order kept (or nil): the kept
+-- ones in its order, then any it doesn't name, in the default's.
+function GT.OrderIds(ids, saved)
+    local at = {}
+    for i, id in ipairs(type(saved) == "table" and saved or {}) do if at[id] == nil then at[id] = i end end
+    local out = {}
+    for i, id in ipairs(ids) do out[#out + 1] = { id = id, rank = at[id] or (100000 + i) } end
+    table.sort(out, function(a, b) return a.rank < b.rank end)
+    for i, e in ipairs(out) do out[i] = e.id end
+    return out
+end
+
+-- Where a drop at height `y` lands among tabs whose middles are `mids`
+-- (top first): the place it's put, 1..#mids + 1.
+function GT.DropAt(mids, y)
+    local n = 1
+    for _, m in ipairs(mids) do if y < m then n = n + 1 end end
+    return n
+end
+
+-- `order` with `id` moved to place `to` (as GT.DropAt counts, before the move).
+function GT.MoveId(order, id, to)
+    local out, from = {}, nil
+    for i, x in ipairs(order) do if x == id then from = i else out[#out + 1] = x end end
+    if not from then return order end
+    if to > from then to = to - 1 end
+    table.insert(out, math.max(1, math.min(to, #out + 1)), id)
+    return out
+end
+
+local ghost, marker
+local function cursorY()
+    local _, y = GetCursorPosition()
+    local s = CommunitiesFrame:GetEffectiveScale()
+    return (y or 0) / ((s and s > 0) and s or 1)
+end
+local function mids()
+    local out = {}
+    for _, t in ipairs(laid) do
+        local top, bottom = t:GetTop(), t:GetBottom()
+        out[#out + 1] = (top and bottom) and (top + bottom) / 2 or 0
+    end
+    return out
+end
+
+local layout                 -- (below)
+
+local function dragFollow()
+    if not (drag and ghost) then return end
+    local x, y = GetCursorPosition()
+    local s = UIParent:GetEffectiveScale()
+    ghost:ClearAllPoints()
+    ghost:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / s, y / s)
+    -- (the gold line: over the tab it would land before, or under the last)
+    local to = GT.DropAt(mids(), cursorY())
+    local under = laid[to] == nil
+    local by = laid[to] or laid[#laid]
+    if by then
+        marker:ClearAllPoints()
+        if under then marker:SetPoint("TOP", by, "BOTTOM", 0, -9)
+        else marker:SetPoint("BOTTOM", by, "TOP", 0, 9) end
+        marker:Show()
+    end
+end
+
+local function startDrag(t)
+    if InCombatLockdown and InCombatLockdown() then return end
+    drag = t
+    if not ghost then
+        ghost = CreateFrame("Frame", nil, UIParent)
+        ghost:SetSize(30, 30)
+        ghost:SetFrameStrata("TOOLTIP")
+        ghost.icon = ghost:CreateTexture(nil, "ARTWORK"); ghost.icon:SetAllPoints()
+        ghost:SetAlpha(0.75)
+        ghost:SetScript("OnUpdate", ns.guard(dragFollow, "guild tab drag"))
+        marker = ghost:CreateTexture(nil, "OVERLAY")        -- (ours: nothing added to the game's window)
+        marker:SetColorTexture(1, 0.82, 0, 0.9)
+        marker:SetSize(40, 2)
+    end
+    local icon = t.Icon and t.Icon:GetTexture()
+    ghost.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    ghost:Show()
+    t:SetAlpha(0.4)
+    dragFollow()
+end
+
+local function endDrag(t)
+    if drag ~= t then return end
+    drag = nil
+    t:SetAlpha(1)
+    if ghost then ghost:Hide(); marker:Hide() end
+    local order = {}
+    for _, x in ipairs(laid) do order[#order + 1] = idOf(x) end
+    local moved = GT.MoveId(order, idOf(t), GT.DropAt(mids(), cursorY()))
+    if table.concat(moved, ",") == table.concat(order, ",") then return end
+    if ns.db then ns.db.guildTabOrder = moved end
+    PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+    layout()
+end
+
+local function hookDrag(t)
+    if dragHooked[t] then return end
+    dragHooked[t] = true
+    t:RegisterForDrag("LeftButton")
+    t:HookScript("OnDragStart", function(self) ns.guard(startDrag, "guild tab drag")(self) end)
+    t:HookScript("OnDragStop", function(self) ns.guard(endDrag, "guild tab drop")(self) end)
+end
+
+-- The top tab, if it's ours (nil: one of the game's is on top).
+local function topOurs() return laid[1] and laid[1].mwTab and laid[1] or nil end
+-- Our first tab in the order (the minimap button's default page).
+local function firstOurs()
+    for _, t in ipairs(laid) do if t.mwTab then return t end end
+    return tabs[1]
+end
+
+function layout()
     local cf = CommunitiesFrame
     local guild, info = GT.GuildPicked()
     guildLook(guild, info)
@@ -263,42 +402,40 @@ local function layout()
         GT.Deselect()
         return
     end
-    local below = 1                     -- our tabs from here go under the game's
-    local chat = cf.ChatTab
-    if chat and chat:IsShown() then
-        local top = tabs[1]
-        top:ClearAllPoints()
-        top:SetPoint("TOPLEFT", cf, "TOPRIGHT", 0, -36)
-        top:Show()
-        chat:ClearAllPoints()
-        chat:SetPoint("TOPLEFT", top, "BOTTOMLEFT", 0, -20)
-        below = 2
-    end
-    -- The lowest one; without positions yet, the last in the list.
-    local last, lastTop = list[#list], nil
-    for _, t in ipairs(list) do
-        hookGameTab(t)
-        local top = t:GetTop()
-        if not top then lastTop = nil; break end
-        if not lastTop or top < lastTop then last, lastTop = t, top end
-    end
-    if not lastTop then last = list[#list] end
-    -- (a page's `visible` can keep its tab away: the Officers tab)
-    local prev = last
-    for i = below, #tabs do
-        local t = tabs[i]
+    -- Ours shown (a page's `visible` can keep its tab away: the Officers tab).
+    local ours = {}
+    for _, t in ipairs(tabs) do
         local p = ns.UI.pages[t.index]
         local vis = p and p.guild
         vis = not (vis and vis.visible) or vis.visible()
-        if vis then
-            t:ClearAllPoints()
-            t:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -20)
-            t:Show()
-            prev = t
+        if vis then ours[#ours + 1] = t
         else
             t:Hide()
             if current == t.index then GT.Deselect() end
         end
+    end
+    -- The game's in its own order (the ones we know by name first).
+    local rankOf = {}
+    for i, k in ipairs(GAME_KEYS) do if cf[k] then rankOf[cf[k]] = i end end
+    for i, t in ipairs(list) do rankOf[t] = rankOf[t] or (100 + i) end
+    table.sort(list, function(a, b) return rankOf[a] < rankOf[b] end)
+    -- The default (ours[1], the game's, the rest of ours), then the kept order.
+    local byId, ids = {}, {}
+    local function add(t) local id = idOf(t); byId[id] = t; ids[#ids + 1] = id end
+    if ours[1] then add(ours[1]) end
+    for _, t in ipairs(list) do hookGameTab(t); add(t) end
+    for i = 2, #ours do add(ours[i]) end
+    laid = {}
+    local prev
+    for _, id in ipairs(GT.OrderIds(ids, ns.db and ns.db.guildTabOrder)) do
+        local t = byId[id]
+        hookDrag(t)
+        t:ClearAllPoints()
+        if prev then t:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -20)
+        else t:SetPoint("TOPLEFT", cf, "TOPRIGHT", 0, -36) end
+        if t.mwTab then t:Show() end
+        laid[#laid + 1] = t
+        prev = t
     end
     if ppsShown then
         pps:ClearAllPoints()
@@ -440,15 +577,16 @@ local function attach()
     if cf.UpdateCommunitiesTabs then hooksecurefunc(cf, "UpdateCommunitiesTabs", ns.guard(layout, "guild tabs")) end
     if cf.SetDisplayMode then hooksecurefunc(cf, "SetDisplayMode", ns.guard(layout, "guild tabs")) end
     GT.RosterRock()
-    -- The guild window opens on our first tab (Leaderboard), unless the
-    -- minimap button or /mw already asked for another page.
+    -- The guild window opens on its top tab (if it's ours: one of the
+    -- game's on top, on the game's own page - we never switch its pages),
+    -- unless the minimap button or /mw already asked for another page.
     cf:HookScript("OnShow", ns.guard(function()
         layout()
         C_Timer.After(0, ns.guard(function()               -- (once its tabs have positions)
             layout()
-            -- First open since login/reload: the Leaderboard. After that, as
-            -- the game does: the page you left it on (the game remembers its
-            -- own; ours we bring back).
+            -- First open since login/reload: the top tab. After that, as the
+            -- game does: the page you left it on (the game remembers its own;
+            -- ours we bring back).
             if pending and tabs[1]:IsShown() then
                 local want = pending
                 pending = nil
@@ -456,7 +594,8 @@ local function attach()
             end
             if not current then
                 if not opened then
-                    if tabs[1]:IsShown() then GT.Select(tabs[1].index) end
+                    local top = topOurs()
+                    if top and top:IsShown() then GT.Select(top.index) end
                 elseif remembered then
                     local want = remembered
                     remembered = nil
@@ -587,9 +726,8 @@ function GT.Refresh()
     if p and p.gframe and p.refresh then ns.guard(p.refresh, "page " .. p.label)(p.gframe) end
 end
 
--- Minimap button and /mw: open the guild window on a page (default: the
--- first, Stats), or close it if it's already showing one of ours.
--- Show page `index` (default: the first, Leaderboard) on the guild window.
+-- Minimap button and /mw: show page `index` (default: the highest of ours
+-- in the tabs' order) on the guild window.
 -- We never open or close the game's windows ourselves: on this client a
 -- window opened or closed from addon code taints the game's window manager,
 -- and the next window it opens (the character pane, say) breaks on secret
@@ -597,7 +735,8 @@ end
 -- when the guild window next opens (J), and we say so.
 function GT.Toggle(index)
     if not (IsInGuild and IsInGuild()) or failed then return false end
-    local want = index or (tabs[1] and tabs[1].index) or 5
+    local first = firstOurs()
+    local want = index or (first and first.index) or 5
     if GT.Open() then
         layout()
         if GT.Select(want) then return true end

@@ -1255,6 +1255,24 @@ do
     n.ok._scripts.OnClick(n.ok)
 end
 
+-- The guild window's side tabs: their order, dragged and kept (the guild
+-- window isn't in the mock: the ordering itself).
+do
+    local GT = ns.GuildTabs
+    local def = { "mw:Leaderboard", "game:ChatTab", "game:RosterTab", "game:GuildInfoTab", "mw:Stats" }
+    check(table.concat(GT.OrderIds(def, nil), ",") == table.concat(def, ","), "tab order: none kept, the default")
+    local kept = { "game:RosterTab", "mw:Stats", "mw:Leaderboard", "game:ChatTab", "game:GuildInfoTab" }
+    check(table.concat(GT.OrderIds(def, kept), ",") == table.concat(kept, ","), "tab order: the kept order")
+    check(table.concat(GT.OrderIds({ "mw:Leaderboard", "game:ChatTab", "game:NewTab" }, { "game:ChatTab", "mw:Leaderboard" }), ",")
+        == "game:ChatTab,mw:Leaderboard,game:NewTab", "tab order: a tab the kept order doesn't name goes last")
+    local m = { 100, 60, 20 }                                    -- (three tabs' middles, top first)
+    check(GT.DropAt(m, 120) == 1 and GT.DropAt(m, 80) == 2 and GT.DropAt(m, 40) == 3 and GT.DropAt(m, 0) == 4, "dropped above, between, below")
+    local o = { "a", "b", "c", "d" }
+    check(table.concat(GT.MoveId(o, "d", 1), "") == "dabc" and table.concat(GT.MoveId(o, "a", 5), "") == "bcda"
+        and table.concat(GT.MoveId(o, "a", 3), "") == "bacd" and table.concat(GT.MoveId(o, "c", 3), "") == "abcd",
+        "a tab moved up, to the bottom, down one, onto itself")
+end
+
 -- An offline guildie's badges: no whisper (the game would say "No player
 -- named ..."); what an online one sends is kept for when they're offline
 do
