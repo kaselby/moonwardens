@@ -532,7 +532,8 @@ local function describe(e)
         if e.value and e.value > 0 then
             local what = ({ captures = " capture points", outposts = " outposts", forts = " forts", victory = " victories",
                 ashenvale_outposts = " Ashenvale outposts", shobekaran = " Shobek'Aran captures",
-                lesi_cave = " Lesi's Bear Cave captures", support = " Splintertree Post captures supported" })[b and b.series or ""]
+                lesi_cave = " Lesi's Bear Cave captures", support = " Splintertree Post captures supported",
+                leaders = " faction leaders slain" })[b and b.series or ""]
             bits[#bits + 1] = K.commas(e.value) .. (what or " kills")
         end
         if e.version and e.version ~= "" then bits[#bits + 1] = "v" .. e.version end

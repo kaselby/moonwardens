@@ -61,6 +61,7 @@ local AWAY_EVERY = 10       -- off the war maps: look this often (s)
 local SAME_CAPTURE = { captures = 60, support = 60,
                        outposts = 240, ashenvale_outposts = 240, shobekaran = 240, lesi_cave = 240,
                        forts = 540,
+                       leaders = 3600,   -- (Leaders.lua: each kill its own id, by spawn - a report late is the same)
                        victory = 1800 }  -- (one victory, heard from a whole raid; the next is hours off at least)
 local function sameCapture(series, a, b)
     return math.abs((a or 0) - (b or 0)) < (SAME_CAPTURE[series or "captures"] or 60)
@@ -177,6 +178,7 @@ local function credit(series, id, name, ct, what, quiet)
     if ns.Ledger and ns.Ledger.CheckClaims then ns.after(2, ns.Ledger.CheckClaims, "capture claims") end
     return true                                                         -- (new: counted now)
 end
+Captures.Credit = credit           -- (Leaders.lua's kills are kept here too)
 
 -- A capture of `key` at `ct`: new since the last look, fresh, ours, and me in it?
 -- (taken just now, for us - wherever I was)

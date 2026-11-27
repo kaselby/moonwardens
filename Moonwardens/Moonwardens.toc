@@ -26,6 +26,7 @@ Badges.lua
 Ledger.lua
 Hunt.lua
 Captures.lua
+Leaders.lua
 BadgesUI.lua
 BadgeChest.lua
 OfficerUI.lua

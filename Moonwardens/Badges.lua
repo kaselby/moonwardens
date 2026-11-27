@@ -64,8 +64,9 @@ end
 Badges.CATEGORIES = {
     { id = "overview", name = "Badges Overview" },
     -- Kalimdor Defense: the Leaderboard's kills and places, Ashenvale's
-    -- objectives, and Kalimdor's guild outposts and forts (Captures.lua), one
-    -- page. (Was two: Ashenvale Defense and Overlord.)
+    -- objectives, Kalimdor's guild outposts and forts (Captures.lua), and
+    -- the Horde's faction leaders slain (Leaders.lua), one page. (Was two:
+    -- Ashenvale Defense and Overlord.)
     { id = "kalimdor", name = "Kalimdor Defense" },
     -- Huntress Training's monthly bounties, then the Ritual of the Hunt.
     { id = "wyldhunt", name = "The Wyld Hunt" },
@@ -197,9 +198,22 @@ for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 5, 100 }, { "gold", 10, 20
     Badges.LIST[#Badges.LIST + 1] = {
         id = i == 1 and "tv" or ("tv" .. i), cat = "kalimdor", kind = "selflifetime", series = "victory",
         tier = t[1], goal = t[2], points = t[3], unit = "total victories",
-        name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
+        name = "Tor ilisar'thera'nal!", icon = { "achievement_leader_thrall", "Ability_Warrior_Rampage" },
         desc = t[2] == 1 and "Be in the party or raid that takes all of Ashenvale on Overlord."
             or ("Be in the party or raid that takes all of Ashenvale on Overlord %d times."):format(t[2]),
+    }
+end
+-- Bane of the Horde: Thrall, Cairne Bloodhoof or Sylvanas Windrunner slain
+-- with me there (Leaders.lua: my raid's kill, beside them as they fell, or
+-- seen in the 5 minutes before) - any of the three, each death once. Tiers
+-- by how many in all.
+for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 3, 100 }, { "gold", 9, 200 }, { "moonstone", 15, 400 } }) do
+    Badges.LIST[#Badges.LIST + 1] = {
+        id = "fk" .. i, cat = "kalimdor", kind = "selflifetime", series = "leaders",
+        tier = t[1], goal = t[2], points = t[3], unit = "faction leaders slain",
+        name = "Bane of the Horde", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
+        desc = t[2] == 1 and "Kill Thrall, Cairne Bloodhoof, or Sylvanas Windrunner."
+            or ("Kill Thrall, Cairne Bloodhoof, or Sylvanas Windrunner %d times."):format(t[2]),
     }
 end
 -- Holding the line: inside one of Splintertree Post's two approaches
@@ -416,7 +430,7 @@ Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime
 -- ("Copper 10,000 kills", "Gold 1st place"). By what's counted; a badge can
 -- say its own (`measure`).
 local MEASURE = { captures = "captures", shobekaran = "captures", lesi_cave = "captures", ashenvale_outposts = "captures",
-    outposts = "outposts", forts = "forts", victory = "victories", support = "times" }
+    outposts = "outposts", forts = "forts", victory = "victories", support = "times", leaders = "kills" }
 for _, b in ipairs(Badges.LIST) do
     if not b.measure then
         if b.kind == "lifetime" or b.kind == "weekly" then b.measure = "kills"

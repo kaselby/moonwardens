@@ -1283,6 +1283,103 @@ do
         "a tab moved up, to the bottom, down one, onto itself")
 end
 
+-- Bane of the Horde (Leaders.lua): Thrall, Cairne or Sylvanas slain with me
+-- in the raid that killed them, beside them as they fell, or having seen
+-- them in the 5 minutes before; each death once, however many tell it.
+do
+    local B, C = ns.Badges, ns.Captures
+    local keepCaps, keepMap, keepPos, keepGroup = ns.db.objectiveCaptures, W.map, W.pos, W.group
+    ns.db.objectiveCaptures = {}
+    local function kills() local _, n = C.Weeks("leaders"); return n end
+    local function guid(npc, spawn) return ("Creature-0-1-1-1-%d-%s"):format(npc, spawn) end
+    local function lkSent()
+        local n = 0
+        for _, m in ipairs(W.sent) do if m.m:find("^LK|") then n = n + 1 end end
+        return n
+    end
+    local function lk(from, npc, spawn, t, how)
+        W.fire("CHAT_MSG_ADDON", "MWG1", ("LK|1|%d|%s|%d|%s"):format(npc, spawn, t, how), "GUILD", from)
+    end
+    W.map = 1440
+    -- 1. My raid's killing blow on Thrall: counted, and told to the guild once.
+    local lk0 = lkSent()
+    W.fire("PARTY_KILL", "Player-1-0001", guid(4949, "00A1"))
+    W.advance(1)
+    check(kills() == 1 and lkSent() == lk0 + 1, "Thrall slain by my raid: counted, told the guild")
+    -- (again, and told back by a guildie: once)
+    W.fire("PARTY_KILL", "Player-1-0001", guid(4949, "00A1"))
+    lk("Thalanor-Oakheart", 4949, "00A1", time(), "k")
+    W.advance(1)
+    check(kills() == 1 and lkSent() == lk0 + 1, "the same death again: once")
+    -- 2. Cairne seen (my target) in Thunder Bluff; I leave; a guildie sees him
+    -- die 2 minutes on: counted. Seen 6 minutes before: not.
+    W.map = 1456
+    W.units.target = { guid = guid(3057, "00B1") }
+    W.fire("PLAYER_TARGET_CHANGED")
+    W.units.target = nil
+    W.map = 1440
+    W.advance(120)
+    lk("Caelith-Shade", 3057, "00B1", time(), "s")
+    W.advance(1)
+    check(kills() == 2, "Cairne seen 2 min before he died: counted")
+    W.map = 1456
+    W.units.target = { guid = guid(3057, "00B2") }
+    W.fire("PLAYER_TARGET_CHANGED")
+    W.units.target = nil
+    W.map = 1440
+    W.advance(360, 1)
+    lk("Caelith-Shade", 3057, "00B2", time(), "s")
+    W.advance(1)
+    check(kills() == 2, "seen 6 min before: not counted")
+    -- 3. In Sylvanas's seat as she dies (a guildie saw it): counted.
+    W.map = 1458
+    W.pos = { 0.578, 0.916 }
+    W.advance(3)
+    lk("Caelith-Shade", 10181, "00C1", time(), "s")
+    W.advance(1)
+    check(kills() == 3, "beside Sylvanas as she fell: counted")
+    -- (on the High Rise, wherever on it, as Cairne dies: counted)
+    W.map, W.pos, W.subzone = 1456, { 0.1, 0.1 }, "High Rise"
+    W.advance(3)
+    lk("Caelith-Shade", 3057, "00B3", time(), "s")
+    W.advance(1)
+    W.subzone = ""
+    check(kills() == 4, "on the High Rise as Cairne fell: counted")
+    -- 4. A groupmate's raid kill of Thrall, me far away: counted; the same
+    -- from someone not in my group: not.
+    W.map, W.pos = 1440, keepPos
+    W.advance(30)
+    W.group = { "Thalanor Oakheart" }
+    W.fire("GROUP_ROSTER_UPDATE")
+    lk("Thalanor-Oakheart", 4949, "00A2", time(), "k")
+    lk("Caelith-Shade", 4949, "00A3", time(), "k")
+    W.advance(1)
+    check(kills() == 5, "a groupmate's raid kill counts; another's group's doesn't")
+    -- 5. Thrall seen dead in Orgrimmar (my target): counted, and told.
+    W.group = {}
+    W.fire("GROUP_ROSTER_UPDATE")
+    W.map = 1454
+    local lk1 = lkSent()
+    W.units.target = { guid = guid(4949, "00A4"), dead = true }
+    W.fire("PLAYER_TARGET_CHANGED")
+    W.advance(1)
+    check(kills() == 6 and lkSent() == lk1 + 1, "Thrall seen dead: counted, told the guild")
+    W.units.target = nil
+    -- (an old death told: nothing)
+    lk("Caelith-Shade", 10181, "00C2", time() - 1000, "s")
+    W.advance(1)
+    check(kills() == 6, "an old death told: not counted")
+    -- The badge: four tiers, its own page.
+    check(B.Get("fk1").goal == 1 and B.Get("fk2").goal == 3 and B.Get("fk3").goal == 9 and B.Get("fk4").goal == 15
+        and B.Get("fk1").track == B.Get("fk4").track and B.Get("fk1").cat == "kalimdor" and not B.IsPage("capitals")
+        and not B.Needs(B.Get("fk1")), "Bane of the Horde: tiers 1, 3, 9, 15, on Kalimdor Defense, no Overlord needed")
+    local m = B.Mine().badges
+    check(m.fk1.times == 1 and m.fk2.times == 1 and m.fk3.times == 0 and m.fk3.value == 6, "six kills: copper and silver, gold 6/9")
+    W.map, W.pos, W.group = keepMap, keepPos, keepGroup
+    W.fire("GROUP_ROSTER_UPDATE")
+    ns.db.objectiveCaptures = keepCaps
+end
+
 -- An offline guildie's badges: no whisper (the game would say "No player
 -- named ..."); what an online one sends is kept for when they're offline
 do
