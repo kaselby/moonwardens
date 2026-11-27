@@ -252,22 +252,168 @@ end
 
 UI.AddPage(9, "Settings", buildSettings, refreshSettings)
 
--- Once (per account): where Moonwardens went, in our dialog, a few seconds
--- after loading in. Only its button closes it (not Escape); after that it
--- never shows again (till a fresh start, Badges.lua). Closed any other way,
--- it shows again next time. (Seen or not: asked only as it's due, after the
--- fresh start has had its say.)
+---------------------------------------------------------------------------
+-- The notice: where Moonwardens went. Once (per account), a few seconds
+-- after loading in, in a window of the addon's own look: the Badge
+-- Inspector's frame (the game's portrait window, the moon for portrait),
+-- the Badges tab's ground (dark, the game's rock, the Legacy art), a gold
+-- heading over a gold rule, what moved, and the key that opens it (the
+-- player's own binding, read from the game; J by default). Only its button
+-- closes it - no close box, not Escape; after that it never shows again
+-- (till a fresh start, Badges.lua). Closed any other way (a reload, logging
+-- out), it shows again next time. (Seen or not: asked only as it's due,
+-- after the fresh start has had its say.) /mw test notice: shown again.
+---------------------------------------------------------------------------
+local NOTICE_ICON = "Interface\\Icons\\Spell_Nature_MoonGlow"
+local NOTICE_W, NOTICE_H = 440, 262
+local notice
+
+local function noticeAtlas(tex, name)
+    if not (tex.SetAtlas and pcall(tex.SetAtlas, tex, name, false)) then return false end
+    return true
+end
+
+-- The key that opens the guild window, as the game names it ("J",
+-- "Shift-G"), and whether it's the game's own: nil if none is bound.
+local function guildKey()
+    for _, action in ipairs({ "TOGGLEGUILDTAB", "TOGGLECOMMUNITIESFRAME" }) do
+        local key = ns.try(GetBindingKey, action)
+        if type(key) == "string" and key ~= "" then
+            local shown = ns.try(GetBindingText, key, "KEY_")
+            return (type(shown) == "string" and shown ~= "") and shown or key, key == "J"
+        end
+    end
+end
+
+local function buildNotice()
+    local f
+    for _, t in ipairs({ "PortraitFrameTemplate", "BasicFrameTemplateWithInset" }) do
+        local ok, fr = pcall(CreateFrame, "Frame", "MoonwardensNotice", UIParent, t)
+        if ok and fr then f = fr; break end
+    end
+    if not f then
+        f = CreateFrame("Frame", "MoonwardensNotice", UIParent, "BackdropTemplate")
+        f:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+    end
+    f:SetSize(NOTICE_W, NOTICE_H)
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    f:SetPoint("CENTER", 0, 80)
+    if f.SetTitle then pcall(f.SetTitle, f, "Moonwardens")
+    else
+        local fs = f.TitleText or (f.TitleContainer and f.TitleContainer.TitleText)
+        if fs then fs:SetText("Moonwardens") end
+    end
+    if not (f.SetPortraitToAsset and pcall(f.SetPortraitToAsset, f, NOTICE_ICON)) then
+        local p = f.portrait or (f.PortraitContainer and f.PortraitContainer.portrait)
+        if p then p:SetTexture(NOTICE_ICON) end
+    end
+    -- (only its button closes it)
+    for _, k in ipairs({ "CloseButton", "ClosePanelButton" }) do
+        local close = rawget(f, k)
+        if type(close) == "table" and close.Hide then close:Hide() end
+    end
+
+    -- The ground: the Badges tab's (dark, the game's rock, the Legacy art).
+    local inset = CreateFrame("Frame", nil, f)
+    inset:SetPoint("TOPLEFT", 10, -62)
+    inset:SetPoint("BOTTOMRIGHT", -10, 46)
+    local under = inset:CreateTexture(nil, "BACKGROUND", nil, -4); under:SetAllPoints(); under:SetColorTexture(0.03, 0.03, 0.04, 1)
+    local rock = inset:CreateTexture(nil, "BACKGROUND", nil, -3); rock:SetAllPoints()
+    rock:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock", "REPEAT", "REPEAT")
+    rock:SetHorizTile(true); rock:SetVertTile(true)
+    local art = inset:CreateTexture(nil, "BACKGROUND", nil, -2); art:SetAllPoints()
+    if not noticeAtlas(art, "Legacy-Rewards-Tracker-background") then art:Hide() end
+
+    -- A gold heading over a gold rule, as the Badges pages' (larger: it's the whole message).
+    local head = inset:CreateFontString(nil, "OVERLAY", _G.Game15Font_Shadow and "Game15Font_Shadow" or "GameFontNormalLarge")
+    local hf, hs, hfl = head:GetFont()
+    if hf and hs then head:SetFont(hf, hs + 5, hfl) end
+    head:SetTextColor(UI.GOLD[1], UI.GOLD[2], UI.GOLD[3])
+    head:SetPoint("TOP", 0, -18)
+    head:SetText("Moonwardens has moved")
+    local rule = inset:CreateTexture(nil, "ARTWORK")
+    rule:SetColorTexture(0.55, 0.45, 0.2, 0.6)
+    rule:SetHeight(1)
+    rule:SetPoint("TOP", head, "BOTTOM", 0, -8)
+    rule:SetWidth(NOTICE_W - 120)
+
+    local body = UI.Text(inset, nil, nil, "CENTER")
+    body:SetPoint("TOP", rule, "BOTTOM", 0, -12)
+    body:SetWidth(NOTICE_W - 80)
+    body:SetSpacing(3)
+    body:SetText("The Leaderboard and your Badges now live in the\n|cffffffffGuild & Communities|r window, as tabs along its side.")
+
+    -- "Press [J] to open it": the key as a key cap.
+    local row = CreateFrame("Frame", nil, inset)
+    row:SetSize(NOTICE_W - 60, 28)
+    row:SetPoint("TOP", body, "BOTTOM", 0, -16)
+    local press = UI.Text(row, nil, nil, "RIGHT")
+    press:SetText("Press")
+    local cap = CreateFrame("Frame", nil, row, "BackdropTemplate")
+    cap:SetHeight(26)
+    if cap.SetBackdrop then
+        cap:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = false, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+        cap:SetBackdropColor(0.08, 0.07, 0.05, 0.95)
+        cap:SetBackdropBorderColor(0.8, 0.66, 0.3, 1)
+    end
+    cap.key = cap:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    cap.key:SetPoint("CENTER", 0, 0)
+    local open = UI.Text(row, nil, nil, "LEFT")
+    open:SetText("to open it")
+    f.hint = UI.Text(inset, "small", UI.GREY, "CENTER")
+    f.hint:SetPoint("TOP", row, "BOTTOM", 0, -5)
+    -- (laid out as it's shown: the key's width changes with the binding)
+    function f.refreshKey()
+        local key, default = guildKey()
+        cap.key:SetText(key or "J")
+        local kw = math.max(26, math.ceil((ns.try(cap.key.GetStringWidth, cap.key) or 10) + 18))
+        cap:SetWidth(kw)
+        local pw = ns.try(press.GetStringWidth, press) or 34
+        local ow = ns.try(open.GetStringWidth, open) or 60
+        local total = pw + 8 + kw + 8 + ow
+        press:ClearAllPoints(); press:SetPoint("LEFT", row, "CENTER", -total / 2, 0)
+        cap:ClearAllPoints(); cap:SetPoint("LEFT", row, "CENTER", -total / 2 + pw + 8, 0)
+        open:ClearAllPoints(); open:SetPoint("LEFT", cap, "RIGHT", 8, 0)
+        f.hint:SetText(not key and "(by default - it isn't bound to a key now: Esc > Options > Keybindings)"
+            or default and "(by default)" or "")
+    end
+
+    f.ok = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.ok:SetSize(140, 24)
+    f.ok:SetPoint("BOTTOM", 0, 14)
+    f.ok:SetText(OKAY or "Okay")
+    f.ok:SetScript("OnClick", function()
+        ns.db.movedNoticeSeen = true
+        f:Hide()
+        PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_CLOSE or 851)
+    end)
+    f:Hide()
+    return f
+end
+
+function UI.ShowMovedNotice()
+    if not notice then notice = buildNotice() end
+    notice.refreshKey()
+    notice:Show()
+    notice:Raise()
+    PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPEN or 850)
+end
+function UI.Notice() return notice end   -- (tests)
+
 ns.onLogin(function()
     ns.after(4, function()
-        if ns.db.movedNoticeSeen or not ns.Dialog then return end
-        ns.Dialog.Show({
-            title = "Moonwardens",
-            text = "Moonwardens has moved to your Guild & Communities tab.\n|cffffd100J|r by default",
-            accept = OKAY or "Okay", noCancel = true, noEscape = true,
-            onAccept = function() ns.db.movedNoticeSeen = true end,
-        })
+        if ns.db.movedNoticeSeen then return end
+        UI.ShowMovedNotice()
     end, "moved notice")
 end, "moved notice")
+
+ns.tests.notice = { dev = true, help = "the Moonwardens has moved notice again", fn = function() UI.ShowMovedNotice() end }
 
 ---------------------------------------------------------------------------
 -- Minimap button

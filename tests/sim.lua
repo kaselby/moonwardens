@@ -1239,6 +1239,22 @@ do
     GetServerTime = realGST
 end
 
+-- The "Moonwardens has moved" notice: shown at login, in a window of its
+-- own (not the confirm box); Escape doesn't close it, only Okay - for good.
+do
+    local n = ns.UI.Notice()
+    check(n and n == MoonwardensNotice and n:IsShown(), "the moved notice shown at login")
+    local esc = false
+    for _, name in ipairs(UISpecialFrames or {}) do if name == "MoonwardensNotice" then esc = true end end
+    check(not esc, "Escape doesn't close it")
+    n.ok._scripts.OnClick(n.ok)
+    check(not n:IsShown() and ns.db.movedNoticeSeen == true, "Okay closes it, for good")
+    ns.db.movedNoticeSeen = nil
+    SlashCmdList.MOONWARDENS("test notice")
+    check(n:IsShown(), "/mw test notice shows it again")
+    n.ok._scripts.OnClick(n.ok)
+end
+
 -- An offline guildie's badges: no whisper (the game would say "No player
 -- named ..."); what an online one sends is kept for when they're offline
 do
