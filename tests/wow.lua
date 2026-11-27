@@ -230,6 +230,7 @@ function IsInInstance() if W.instance then return true, "party" end return false
 W.combat = false
 function UnitAffectingCombat() return W.combat end
 function UnitIsDeadOrGhost() return false end
+function UnitIsDead(u) return W.units[u] ~= nil and W.units[u].dead == true end
 function UnitLevel() return 60 end
 function GetGuildInfo() return "Moonwardens", "Warden-General", 0 end
 function IsIndoors() return false end

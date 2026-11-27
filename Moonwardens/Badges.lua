@@ -35,6 +35,19 @@ ns.Badges = Badges
 -- week: none of that week).
 Badges.FRESH_START = 1795720800          -- 2026-11-26 19:20 UTC (0.7.0)
 Badges.FRESH_KEEPS_WEEK = true
+-- And the weeks before it, carried over as well (with FRESH_KEEPS_WEEK): this
+-- many, back from its week. 0.7.1: 1, last week's Leaderboard too (the game
+-- keeps two weeks - this one and last - so no more than 1 is ever there to
+-- count). No wipe: only what's counted changes.
+Badges.FRESH_CARRY_BACK = 1
+
+-- The first week of kills that counts toward the kills badges (nil: not
+-- known yet).
+function Badges.FirstCountedWeek()
+    local fw = Badges.FreshWeek()
+    if not fw then return nil end
+    return Badges.FRESH_KEEPS_WEEK and (fw - (Badges.FRESH_CARRY_BACK or 0)) or fw
+end
 
 -- The week of the fresh start (the Leaderboard's), once it can be known.
 function Badges.FreshWeek()
@@ -51,8 +64,9 @@ end
 Badges.CATEGORIES = {
     { id = "overview", name = "Badges Overview" },
     -- Kalimdor Defense: the Leaderboard's kills and places, Ashenvale's
-    -- objectives, and Kalimdor's guild outposts and forts (Captures.lua), one
-    -- page. (Was two: Ashenvale Defense and Overlord.)
+    -- objectives, Kalimdor's guild outposts and forts (Captures.lua), and
+    -- the Horde's faction leaders slain (Leaders.lua), one page. (Was two:
+    -- Ashenvale Defense and Overlord.)
     { id = "kalimdor", name = "Kalimdor Defense" },
     -- Huntress Training's monthly bounties, then the Ritual of the Hunt.
     { id = "wyldhunt", name = "The Wyld Hunt" },
@@ -184,9 +198,22 @@ for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 5, 100 }, { "gold", 10, 20
     Badges.LIST[#Badges.LIST + 1] = {
         id = i == 1 and "tv" or ("tv" .. i), cat = "kalimdor", kind = "selflifetime", series = "victory",
         tier = t[1], goal = t[2], points = t[3], unit = "total victories",
-        name = "Tor ilisar'thera'nal!", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
+        name = "Tor ilisar'thera'nal!", icon = { "achievement_leader_thrall", "Ability_Warrior_Rampage" },
         desc = t[2] == 1 and "Be in the party or raid that takes all of Ashenvale on Overlord."
             or ("Be in the party or raid that takes all of Ashenvale on Overlord %d times."):format(t[2]),
+    }
+end
+-- Bane of the Horde: Thrall, Cairne Bloodhoof or Sylvanas Windrunner slain
+-- with me there (Leaders.lua: my raid's kill, beside them as they fell, or
+-- seen in the 5 minutes before) - any of the three, each death once. Tiers
+-- by how many in all.
+for i, t in ipairs({ { "copper", 1, 50 }, { "silver", 3, 100 }, { "gold", 9, 200 }, { "moonstone", 15, 400 } }) do
+    Badges.LIST[#Badges.LIST + 1] = {
+        id = "fk" .. i, cat = "kalimdor", kind = "selflifetime", series = "leaders",
+        tier = t[1], goal = t[2], points = t[3], unit = "faction leaders slain",
+        name = "Bane of the Horde", icon = { "inv_misc_head_orc_01", "INV_BannerPVP_02" },
+        desc = t[2] == 1 and "Kill Thrall, Cairne Bloodhoof, or Sylvanas Windrunner."
+            or ("Kill Thrall, Cairne Bloodhoof, or Sylvanas Windrunner %d times."):format(t[2]),
     }
 end
 -- Holding the line: inside one of Splintertree Post's two approaches
@@ -403,7 +430,7 @@ Badges.LIST[#Badges.LIST + 1] = { id = "lt4", cat = "kalimdor", kind = "lifetime
 -- ("Copper 10,000 kills", "Gold 1st place"). By what's counted; a badge can
 -- say its own (`measure`).
 local MEASURE = { captures = "captures", shobekaran = "captures", lesi_cave = "captures", ashenvale_outposts = "captures",
-    outposts = "outposts", forts = "forts", victory = "victories", support = "times" }
+    outposts = "outposts", forts = "forts", victory = "victories", support = "times", leaders = "kills" }
 for _, b in ipairs(Badges.LIST) do
     if not b.measure then
         if b.kind == "lifetime" or b.kind == "weekly" then b.measure = "kills"
@@ -1048,7 +1075,7 @@ function Badges.MyWeeks()
     local out = {}
     for w, c in pairs(raw) do
         if type(w) == "number" then
-            if w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK) then out[w] = c
+            if w > fw or (Badges.FRESH_KEEPS_WEEK and w >= Badges.FirstCountedWeek()) then out[w] = c
             elseif w == fw and base then out[w] = math.max(0, c - base) end
         end
     end
@@ -1114,14 +1141,16 @@ function Badges.WeeksOf(key)
     if key == ns.meKey then return Badges.MyWeeks() end
     local weeks = {}
     -- (the fresh start: nothing before its week; the board's counts of its
-    -- week are theirs too when the week is carried over (FRESH_KEEPS_WEEK) -
-    -- else not to be trusted, they started before it - only theirs)
+    -- week, and the ones carried back, are theirs too when the weeks are
+    -- carried over (FRESH_KEEPS_WEEK, FRESH_CARRY_BACK) - else not to be
+    -- trusted, they started before it - only theirs)
     local fw = Badges.FreshWeek() or -1
+    local first = Badges.FirstCountedWeek() or fw
     local o = others[key]
-    if o then for w, c in pairs(o.weeks) do if w >= fw then weeks[w] = c end end end
+    if o then for w, c in pairs(o.weeks) do if w >= first then weeks[w] = c end end end
     local board = ns.db and ns.db.board or {}
     for w, t in pairs(board) do
-        local e = type(w) == "number" and (w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK)) and type(t) == "table" and t[key]
+        local e = type(w) == "number" and (w > fw or (Badges.FRESH_KEEPS_WEEK and w >= first)) and type(t) == "table" and t[key]
         if e and e.c and e.c > (weeks[w] or 0) then weeks[w] = e.c end
     end
     return weeks
