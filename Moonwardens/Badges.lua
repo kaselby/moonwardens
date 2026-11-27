@@ -35,6 +35,19 @@ ns.Badges = Badges
 -- week: none of that week).
 Badges.FRESH_START = 1795720800          -- 2026-11-26 19:20 UTC (0.7.0)
 Badges.FRESH_KEEPS_WEEK = true
+-- And the weeks before it, carried over as well (with FRESH_KEEPS_WEEK): this
+-- many, back from its week. 0.7.1: 1, last week's Leaderboard too (the game
+-- keeps two weeks - this one and last - so no more than 1 is ever there to
+-- count). No wipe: only what's counted changes.
+Badges.FRESH_CARRY_BACK = 1
+
+-- The first week of kills that counts toward the kills badges (nil: not
+-- known yet).
+function Badges.FirstCountedWeek()
+    local fw = Badges.FreshWeek()
+    if not fw then return nil end
+    return Badges.FRESH_KEEPS_WEEK and (fw - (Badges.FRESH_CARRY_BACK or 0)) or fw
+end
 
 -- The week of the fresh start (the Leaderboard's), once it can be known.
 function Badges.FreshWeek()
@@ -1048,7 +1061,7 @@ function Badges.MyWeeks()
     local out = {}
     for w, c in pairs(raw) do
         if type(w) == "number" then
-            if w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK) then out[w] = c
+            if w > fw or (Badges.FRESH_KEEPS_WEEK and w >= Badges.FirstCountedWeek()) then out[w] = c
             elseif w == fw and base then out[w] = math.max(0, c - base) end
         end
     end
@@ -1114,14 +1127,16 @@ function Badges.WeeksOf(key)
     if key == ns.meKey then return Badges.MyWeeks() end
     local weeks = {}
     -- (the fresh start: nothing before its week; the board's counts of its
-    -- week are theirs too when the week is carried over (FRESH_KEEPS_WEEK) -
-    -- else not to be trusted, they started before it - only theirs)
+    -- week, and the ones carried back, are theirs too when the weeks are
+    -- carried over (FRESH_KEEPS_WEEK, FRESH_CARRY_BACK) - else not to be
+    -- trusted, they started before it - only theirs)
     local fw = Badges.FreshWeek() or -1
+    local first = Badges.FirstCountedWeek() or fw
     local o = others[key]
-    if o then for w, c in pairs(o.weeks) do if w >= fw then weeks[w] = c end end end
+    if o then for w, c in pairs(o.weeks) do if w >= first then weeks[w] = c end end end
     local board = ns.db and ns.db.board or {}
     for w, t in pairs(board) do
-        local e = type(w) == "number" and (w > fw or (w == fw and Badges.FRESH_KEEPS_WEEK)) and type(t) == "table" and t[key]
+        local e = type(w) == "number" and (w > fw or (Badges.FRESH_KEEPS_WEEK and w >= first)) and type(t) == "table" and t[key]
         if e and e.c and e.c > (weeks[w] or 0) then weeks[w] = e.c end
     end
     return weeks

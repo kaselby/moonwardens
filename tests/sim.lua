@@ -1191,6 +1191,16 @@ do
     local tha = ns.key("Thalanor-Oakheart")
     local onBoard = (ns.db.board[cur] or {})[tha]
     check(onBoard and B.WeeksOf(tha)[cur] == onBoard.c, "fresh start, week carried over: a guildie's kills this week, from the board")
+    -- (the week before carried too, FRESH_CARRY_BACK: last week's board, mine and theirs)
+    local keepBack = B.FRESH_CARRY_BACK
+    B.FRESH_CARRY_BACK = 1
+    local lastBoard = (ns.db.board[cur - 1] or {})[tha]
+    check(lastBoard and lastBoard.c > 0 and B.WeeksOf(tha)[cur - 1] == lastBoard.c
+        and B.MyWeeks()[cur - 1] == (LB.Mine(cur - 1) > 0 and LB.Mine(cur - 1) or nil),
+        "the week before carried too: last week's kills, from the board")
+    B.FRESH_CARRY_BACK = 0
+    check(B.WeeksOf(tha)[cur - 1] == nil and B.MyWeeks()[cur - 1] == nil, "not carried back: last week's don't count")
+    B.FRESH_CARRY_BACK = keepBack
     B.FRESH_KEEPS_WEEK = false
     ns.db.freshStart = nil
     B.FreshStartLocal()
